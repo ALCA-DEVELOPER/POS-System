@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Bluetooth,
   CheckCircle,
@@ -36,6 +36,12 @@ export function ReceiptModal({ order, store, onClose }: ReceiptModalProps) {
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setWaPhone(order?.customer_phone ?? "");
+    setStatusMsg(null);
+    setErrorMsg(null);
+  }, [order]);
 
   if (!order) return null;
 

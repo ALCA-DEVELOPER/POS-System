@@ -88,7 +88,6 @@ export function PosTerminalClient({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [cashPaidInput, setCashPaidInput] = useState("");
   const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [completedOrder, setCompletedOrder] = useState<Order | null>(null);
   const [copiedRek, setCopiedRek] = useState(false);
@@ -239,7 +238,6 @@ export function PosTerminalClient({
     setPaymentMethod("cash");
     setCashPaidInput(String(grandTotal));
     setCustomerName("");
-    setCustomerPhone("");
     setQrisFullscreen(false);
     setMobileCartOpen(false);
     setCheckoutOpen(true);
@@ -288,7 +286,7 @@ export function PosTerminalClient({
         p_payment_method: paymentMethod,
         p_discount_amount: discountAmount,
         p_amount_paid: paymentMethod === "cash" ? cashPaidNum : grandTotal,
-        p_customer_phone: customerPhone.trim() || null,
+        p_customer_phone: null,
         p_notes: customerName.trim(),
         p_items: itemsPayload,
       });
@@ -300,7 +298,7 @@ export function PosTerminalClient({
       const resOrder = data as Order;
       const hydratedOrder: Order = {
         ...resOrder,
-        customer_phone: customerPhone.trim() || null,
+        customer_phone: null,
         notes: customerName.trim(),
         items: cart.map((c, idx) => ({
           id: `${resOrder.id}-${idx}`,
@@ -840,34 +838,18 @@ export function PosTerminalClient({
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label htmlFor="custName" className="block text-xs font-semibold text-[#1C1917]">
-                Nama Pelanggan (Opsional)
-              </label>
-              <input
-                id="custName"
-                type="text"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                placeholder="Nama pelanggan"
-                className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917]"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label htmlFor="custWa" className="block text-xs font-semibold text-[#1C1917]">
-                No. WhatsApp (Opsional)
-              </label>
-              <input
-                id="custWa"
-                type="tel"
-                value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
-                placeholder="0812xxxxxxxx"
-                className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917]"
-              />
-            </div>
+          <div className="space-y-1">
+            <label htmlFor="custName" className="block text-xs font-semibold text-[#1C1917]">
+              Nama Pelanggan (Opsional)
+            </label>
+            <input
+              id="custName"
+              type="text"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              placeholder="Nama pelanggan"
+              className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917]"
+            />
           </div>
 
           <button
