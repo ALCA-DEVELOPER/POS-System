@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
@@ -76,6 +76,10 @@ export function BusinessSettingsClient({
   // Staff list & Create/Edit/Delete modals
   const [staff, setStaff] = useState<StaffMember[]>(initialStaff);
   const [staffModalOpen, setStaffModalOpen] = useState(false);
+
+  useEffect(() => {
+    setStaff(initialStaff);
+  }, [initialStaff]);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
   const [staffName, setStaffName] = useState("");
   const [staffEmail, setStaffEmail] = useState("");
@@ -239,6 +243,8 @@ export function BusinessSettingsClient({
           )
         );
         setStaffModalOpen(false);
+        void broadcastBusinessUpdate(initialProfile.business_id, "settings");
+        router.refresh();
         setFeedback({
           type: "ok",
           text: `Data dan role akun ${json.staff.full_name} berhasil diperbarui.`,
@@ -274,6 +280,8 @@ export function BusinessSettingsClient({
           ...prev,
         ]);
         setStaffModalOpen(false);
+        void broadcastBusinessUpdate(initialProfile.business_id, "settings");
+        router.refresh();
         setFeedback({
           type: "ok",
           text: `Akun ${json.staff.full_name} (${ROLE_LABELS[json.staff.role as UserRole]}) berhasil ditambahkan.`,
@@ -301,6 +309,8 @@ export function BusinessSettingsClient({
     setStaff((prev) =>
       prev.map((m) => (m.id === member.id ? { ...m, is_active: !m.is_active } : m))
     );
+    void broadcastBusinessUpdate(initialProfile.business_id, "settings");
+    router.refresh();
   };
 
   const confirmDeleteStaff = async () => {
@@ -320,6 +330,8 @@ export function BusinessSettingsClient({
         text: `Akun ${deleteTarget.full_name} berhasil dihapus.`,
       });
       setDeleteTarget(null);
+      void broadcastBusinessUpdate(initialProfile.business_id, "settings");
+      router.refresh();
     } catch {
       setFeedback({ type: "err", text: "Terjadi gangguan saat menghapus akun staf." });
     } finally {

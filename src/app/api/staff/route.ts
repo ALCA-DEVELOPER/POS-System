@@ -103,16 +103,27 @@ export async function POST(request: Request) {
       );
     }
 
-    await admin
-      .from("profiles")
-      .update({
+    const { error: upsertError } = await admin.from("profiles").upsert(
+      {
+        id: created.user.id,
+        business_id: auth.profile.business_id,
         business_name: auth.profile.business_name,
         owner_name: auth.profile.owner_name,
         full_name,
         phone,
         role,
-      })
-      .eq("id", created.user.id);
+        is_active: true,
+      },
+      { onConflict: "id" }
+    );
+
+    if (upsertError) {
+      await admin.auth.admin.deleteUser(created.user.id);
+      return NextResponse.json(
+        { error: `Gagal menyambungkan profil staf ke bisnis: ${upsertError.message}` },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json(
       {
