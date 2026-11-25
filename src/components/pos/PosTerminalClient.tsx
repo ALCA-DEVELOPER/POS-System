@@ -20,12 +20,11 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { createClient } from "@/lib/supabase/client";
-import { formatRupiah, ORDER_TYPE_LABELS } from "@/lib/format";
+import { formatRupiah } from "@/lib/format";
 import { broadcastBusinessUpdate } from "@/lib/realtime";
 import type {
   CashierShift,
   Order,
-  OrderType,
   PaymentMethod,
   Product,
   ProductCategory,
@@ -71,7 +70,6 @@ export function PosTerminalClient({
   const [category, setCategory] = useState<"Semua" | ProductCategory>("Semua");
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartEntry[]>([]);
-  const [orderType, setOrderType] = useState<OrderType>("dine_in");
   const [discountMode, setDiscountMode] = useState<"rp" | "pct">("rp");
   const [discountInput, setDiscountInput] = useState("0");
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
@@ -282,7 +280,7 @@ export function PosTerminalClient({
 
       const { data, error } = await supabase.rpc("create_pos_order", {
         p_shift_id: shiftId,
-        p_order_type: orderType,
+        p_order_type: "dine_in",
         p_payment_method: paymentMethod,
         p_discount_amount: discountAmount,
         p_amount_paid: paymentMethod === "cash" ? cashPaidNum : grandTotal,
@@ -344,24 +342,6 @@ export function PosTerminalClient({
               Kosongkan
             </button>
           ) : null}
-        </div>
-
-        {/* Order Type Selector */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-black/5">
-          {(["dine_in", "takeaway", "online"] as OrderType[]).map((type) => (
-            <button
-              key={type}
-              type="button"
-              onClick={() => setOrderType(type)}
-              className={`min-h-10 rounded-lg px-2 text-xs font-bold transition-colors ${
-                orderType === type
-                  ? "bg-white text-[#14532D] shadow-xs"
-                  : "text-[#44403C] hover:text-[#1C1917]"
-              }`}
-            >
-              {type === "dine_in" ? "Dine-in" : type === "takeaway" ? "Takeaway" : "Online"}
-            </button>
-          ))}
         </div>
 
         {/* Cart Items */}
@@ -652,7 +632,7 @@ export function PosTerminalClient({
               <ShoppingBag size={22} weight="bold" aria-hidden="true" />
               <div className="text-left">
                 <p className="text-xs font-medium text-white/85">
-                  {totalItems} item · {ORDER_TYPE_LABELS[orderType]}
+                  {totalItems} item
                 </p>
                 <p className="text-sm font-extrabold tabular-nums">
                   {formatRupiah(grandTotal)}
@@ -682,7 +662,7 @@ export function PosTerminalClient({
           if (!qrisFullscreen) setCheckoutOpen(false);
         }}
         title="Pembayaran Kasir"
-        description={`Total tagihan: ${formatRupiah(grandTotal)} (${ORDER_TYPE_LABELS[orderType]})`}
+        description={`Total tagihan: ${formatRupiah(grandTotal)}`}
       >
         <form onSubmit={handleCheckout} className="space-y-4">
           {errorMsg ? (
@@ -876,7 +856,7 @@ export function PosTerminalClient({
                 {storeConfig.business_name}
               </p>
               <p className="text-xs sm:text-sm text-[#44403C]">
-                Scan QRIS untuk membayar ({ORDER_TYPE_LABELS[orderType]})
+                Scan QRIS untuk membayar
               </p>
             </div>
             <button

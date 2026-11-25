@@ -6,7 +6,7 @@ import {
   computeFinancialSummary,
   isMissingTableError,
 } from "@/lib/analytics";
-import { formatDateId, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/format";
+import { formatDateId, PAYMENT_METHOD_LABELS } from "@/lib/format";
 import type { CapitalEntry, Expense, Order } from "@/types/database";
 
 export async function GET(request: Request) {
@@ -111,7 +111,6 @@ export async function GET(request: Request) {
     { header: "No. Order", key: "order_number", width: 20 },
     { header: "Nama Pelanggan", key: "customer_name", width: 22 },
     { header: "Tanggal & Jam", key: "created_at", width: 22 },
-    { header: "Tipe", key: "order_type", width: 22 },
     { header: "Metode Bayar", key: "payment_method", width: 16 },
     { header: "Subtotal", key: "subtotal", width: 16 },
     { header: "Diskon", key: "discount", width: 14 },
@@ -124,7 +123,6 @@ export async function GET(request: Request) {
       order_number: o.order_number,
       customer_name: o.notes || "-",
       created_at: formatDateId(o.created_at, true),
-      order_type: ORDER_TYPE_LABELS[o.order_type] ?? o.order_type,
       payment_method: PAYMENT_METHOD_LABELS[o.payment_method] ?? o.payment_method,
       subtotal: Number(o.subtotal),
       discount: Number(o.discount_amount),

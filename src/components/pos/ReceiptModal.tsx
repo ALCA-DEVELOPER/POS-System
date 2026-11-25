@@ -11,7 +11,6 @@ import {
 import {
   formatDateId,
   formatRupiah,
-  ORDER_TYPE_LABELS,
   PAYMENT_METHOD_LABELS,
 } from "@/lib/format";
 import {
@@ -92,7 +91,6 @@ export function ReceiptModal({ order, store, onClose }: ReceiptModalProps) {
           <div className="space-y-0.5 text-[11px] text-[#44403C] pb-2 border-b border-dashed border-[#1C1917]/25">
             <p>No: {order.order_number}</p>
             <p>Waktu: {formatDateId(order.created_at, true)}</p>
-            <p>Tipe: {ORDER_TYPE_LABELS[order.order_type] ?? order.order_type}</p>
             {order.notes ? (
               <p className="font-semibold text-[#1C1917]">Pelanggan: {order.notes}</p>
             ) : null}

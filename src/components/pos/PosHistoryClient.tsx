@@ -6,7 +6,6 @@ import { CheckCircle, Receipt, Storefront, Trash } from "@phosphor-icons/react";
 import {
   formatDateId,
   formatRupiah,
-  ORDER_TYPE_LABELS,
   PAYMENT_METHOD_LABELS,
 } from "@/lib/format";
 import { broadcastBusinessUpdate } from "@/lib/realtime";
@@ -120,9 +119,6 @@ export function PosHistoryClient({
               </span>
               <span className="rounded-lg bg-[#14532D]/12 text-[#14532D] px-2 py-0.5 text-xs font-bold">
                 {PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method}
-              </span>
-              <span className="rounded-lg bg-black/5 text-[#44403C] px-2 py-0.5 text-xs font-semibold">
-                {ORDER_TYPE_LABELS[order.order_type] ?? order.order_type}
               </span>
               {order.notes ? (
                 <span className="rounded-lg bg-[#B43D0A]/12 text-[#B43D0A] px-2 py-0.5 text-xs font-bold">

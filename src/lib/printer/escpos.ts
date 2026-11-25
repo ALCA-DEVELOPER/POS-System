@@ -2,7 +2,6 @@ import {
   formatDateId,
   formatRupiah,
   normalizeWhatsAppPhone,
-  ORDER_TYPE_LABELS,
   PAYMENT_METHOD_LABELS,
 } from "@/lib/format";
 import type { Order, StorePosConfig } from "@/types/database";
@@ -42,7 +41,6 @@ export function buildEscPosReceipt(
   lines.push(divider);
   lines.push(`No   : ${order.order_number}`);
   lines.push(`Tgl  : ${formatDateId(order.created_at, true)}`);
-  lines.push(`Tipe : ${ORDER_TYPE_LABELS[order.order_type] ?? order.order_type}`);
   if (order.notes) {
     lines.push(`Nama : ${order.notes}`);
   }
@@ -187,7 +185,6 @@ export function buildWhatsAppReceiptText(order: Order, store: StorePosConfig): s
   lines.push("------------------------");
   lines.push(`No. Struk: ${order.order_number}`);
   lines.push(`Waktu: ${formatDateId(order.created_at, true)}`);
-  lines.push(`Tipe: ${ORDER_TYPE_LABELS[order.order_type] ?? order.order_type}`);
   if (order.notes) lines.push(`Pelanggan: ${order.notes}`);
   lines.push("------------------------");
 
