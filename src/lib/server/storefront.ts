@@ -22,11 +22,14 @@ export function buildDefaultStorefrontSettings(
     custom_description: "",
     custom_price: null,
     enable_qris: true,
+    enable_transfer: true,
     enable_cash_chat: true,
     qris_instruction:
       "Setelah berhasil transfer via QRIS, tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda.",
+    transfer_instruction:
+      "Transfer tepat sesuai nominal ke rekening bank di atas, lalu tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda.",
     cash_instruction:
-      "Untuk menjaga ketersediaan stok, pesanan dengan pembayaran tunai tidak diproses lewat form web. Klik tombol di bawah untuk langsung chat penjual.",
+      "Untuk menjaga ketersediaan stok, pemesanan onsite (bayar di tempat) langsung dikonfirmasi lewat chat WhatsApp dengan detail pesanan Anda.",
     whatsapp_number: "",
   };
 }
@@ -38,13 +41,15 @@ export function buildDefaultStorefrontSettings(
 export async function getPublicStorefrontData(): Promise<PublicStorefrontData | null> {
   const admin = createAdminClient();
 
-  const { data: profiles } = await admin
-    .from("profiles")
-    .select(
-      "id, business_id, business_name, phone, address, logo_url, qris_image_url, created_at"
-    )
-    .order("created_at", { ascending: true })
-    .limit(20);
+  const [{ data: profiles }] = await Promise.all([
+    admin
+      .from("profiles")
+      .select(
+        "id, business_id, business_name, phone, address, logo_url, qris_image_url, bank_name, bank_account_number, bank_account_holder, created_at"
+      )
+      .order("created_at", { ascending: true })
+      .limit(20),
+  ]);
 
   const primaryProfile =
     (profiles ?? []).find((p) => p.id === p.business_id) ?? (profiles ?? [])[0];
@@ -124,6 +129,9 @@ export async function getPublicStorefrontData(): Promise<PublicStorefrontData | 
     address: primaryProfile.address || "",
     logoUrl: primaryProfile.logo_url,
     qrisImageUrl: primaryProfile.qris_image_url,
+    bankName: primaryProfile.bank_name || "",
+    bankAccountNumber: primaryProfile.bank_account_number || "",
+    bankAccountHolder: primaryProfile.bank_account_holder || "",
     product: flagship
       ? {
           id: flagship.id,

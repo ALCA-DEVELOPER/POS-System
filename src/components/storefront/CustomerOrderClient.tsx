@@ -5,8 +5,11 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   ArrowsOutSimple,
+  Bank,
+  Check,
   CheckCircle,
   Clock,
+  Copy,
   DownloadSimple,
   MapPin,
   Megaphone,
@@ -15,6 +18,7 @@ import {
   Plus,
   QrCode,
   Storefront,
+  Wallet,
   WarningCircle,
   WhatsappLogo,
   X,
@@ -22,6 +26,10 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { formatDateId, formatRupiah, normalizeWhatsAppPhone } from "@/lib/format";
 import { getPublicOrderChannelName } from "@/lib/realtime";
+import {
+  getCustomerPaymentMethodLabel,
+  resolveCustomerOrderPaymentMethod,
+} from "@/lib/customer-order-payment";
 import type { CustomerOrder, PublicStorefrontData } from "@/types/database";
 
 const LAST_ORDER_STORAGE_KEY = "nummie_last_customer_order_id";
@@ -41,8 +49,10 @@ type TrackedOrderView = Pick<
   | "quantity"
   | "unit_price"
   | "total_amount"
+  | "payment_method"
   | "payment_status"
   | "fulfillment_status"
+  | "notes"
   | "paid_verified_at"
   | "ready_at"
   | "created_at"
@@ -54,11 +64,19 @@ export function CustomerOrderClient({
 }: CustomerOrderClientProps) {
   const router = useRouter();
   const settings = storefront?.settings;
+  const qrisEnabled = settings?.enable_qris !== false;
+  const transferEnabled = settings?.enable_transfer !== false;
+  const directEnabled = qrisEnabled || transferEnabled;
+  const onsiteEnabled = settings?.enable_cash_chat !== false;
+
   const [trackedOrder, setTrackedOrder] = useState<TrackedOrderView | null>(
     initialTrackedOrder
   );
-  const [payTab, setPayTab] = useState<"qris" | "cash_chat">(
-    settings?.enable_qris === false && settings?.enable_cash_chat ? "cash_chat" : "qris"
+  const [payMode, setPayMode] = useState<"direct" | "onsite">(
+    directEnabled ? "direct" : "onsite"
+  );
+  const [directMethod, setDirectMethod] = useState<"qris" | "transfer">(
+    qrisEnabled ? "qris" : "transfer"
   );
   const [quantity, setQuantity] = useState(1);
   const [customerName, setCustomerName] = useState("");
@@ -66,6 +84,7 @@ export function CustomerOrderClient({
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [qrisFullscreen, setQrisFullscreen] = useState(false);
+  const [copiedRek, setCopiedRek] = useState(false);
 
   const product = storefront?.product ?? null;
   const totalAmount = useMemo(() => {
@@ -78,15 +97,21 @@ export function CustomerOrderClient({
     [storefront?.phone]
   );
 
-  // Sinkronkan payTab bila admin menonaktifkan QRIS atau Tunai Chat
+  // Sinkronkan mode pembayaran bila pengaturan toko diperbarui secara real-time
   useEffect(() => {
     if (!settings) return;
-    if (!settings.enable_qris && settings.enable_cash_chat && payTab === "qris") {
-      setPayTab("cash_chat");
-    } else if (settings.enable_qris && !settings.enable_cash_chat && payTab === "cash_chat") {
-      setPayTab("qris");
+    if (!directEnabled && onsiteEnabled && payMode === "direct") {
+      setPayMode("onsite");
+    } else if (directEnabled && !onsiteEnabled && payMode === "onsite") {
+      setPayMode("direct");
     }
-  }, [settings, payTab]);
+
+    if (!qrisEnabled && transferEnabled && directMethod === "qris") {
+      setDirectMethod("transfer");
+    } else if (qrisEnabled && !transferEnabled && directMethod === "transfer") {
+      setDirectMethod("qris");
+    }
+  }, [settings, directEnabled, onsiteEnabled, qrisEnabled, transferEnabled, payMode, directMethod]);
 
   // Dengarkan pembaruan poster/pengaturan storefront secara real-time dari admin
   useEffect(() => {
@@ -190,7 +215,7 @@ export function CustomerOrderClient({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [qrisFullscreen]);
 
-  const handleSubmitQrisOrder = async (e: FormEvent) => {
+  const handleSubmitDirectOrder = async (e: FormEvent) => {
     e.preventDefault();
     if (!product) return;
 
@@ -205,6 +230,7 @@ export function CustomerOrderClient({
           customer_name: customerName,
           customer_phone: customerPhone,
           quantity,
+          payment_method: directMethod,
         }),
       });
       const json = await res.json();
@@ -227,6 +253,18 @@ export function CustomerOrderClient({
     }
   };
 
+  const handleCopyAccountNumber = async () => {
+    const account = storefront?.bankAccountNumber?.trim();
+    if (!account) return;
+    try {
+      await navigator.clipboard.writeText(account);
+      setCopiedRek(true);
+      window.setTimeout(() => setCopiedRek(false), 2000);
+    } catch {
+      // Abaikan jika browser memblokir clipboard
+    }
+  };
+
   const handleResetNewOrder = () => {
     setTrackedOrder(null);
     setQuantity(1);
@@ -237,24 +275,27 @@ export function CustomerOrderClient({
     }
   };
 
-  const buildCashChatUrl = () => {
+  const buildOnsiteChatUrl = () => {
     const nama = customerName.trim() || "Pembeli";
     const hp = customerPhone.trim() ? ` (${customerPhone.trim()})` : "";
     const msg = [
       `Halo Kak ${storefront?.businessName || "Nummie"}, saya ${nama}${hp}.`,
-      `Saya mau pesan:`,
+      `Saya mau pesan Onsite:`,
       `- ${quantity}x ${product?.name || "Paket Lumpia Ubi Ungu (coklat & keju)"} (${formatRupiah(totalAmount)})`,
-      `Metode bayar: TUNAI (chat konfirmasi).`,
+      `Metode bayar: ONSITE / BAYAR DI TEMPAT (konfirmasi WhatsApp).`,
     ].join("\n");
     return `https://wa.me/${storeWaNumber}?text=${encodeURIComponent(msg)}`;
   };
 
   const buildProofChatUrl = (order: TrackedOrderView) => {
+    const methodLabel = getCustomerPaymentMethodLabel(
+      resolveCustomerOrderPaymentMethod(order)
+    );
     const msg = [
       `Halo Kak ${storefront?.businessName || "Nummie"}, saya ${order.customer_name} sudah pesan via web.`,
       `Kode Pesanan: *${order.order_number}*`,
       `Pesanan: ${order.quantity}x ${order.product_name}`,
-      `Total QRIS: ${formatRupiah(order.total_amount)}`,
+      `Total (${methodLabel}): ${formatRupiah(order.total_amount)}`,
       `Berikut saya konfirmasi pembayarannya ya Kak.`,
     ].join("\n");
     return `https://wa.me/${storeWaNumber}?text=${encodeURIComponent(msg)}`;
@@ -407,14 +448,21 @@ export function CustomerOrderClient({
                 )}
                 <div>
                   <p className="text-sm font-bold text-[#1C1917]">
-                    2. Validasi Pembayaran QRIS
+                    2. Validasi Pembayaran{" "}
+                    {getCustomerPaymentMethodLabel(
+                      resolveCustomerOrderPaymentMethod(trackedOrder)
+                    )}
                   </p>
                   <p className="text-xs text-[#44403C]">
                     {trackedOrder.payment_status === "paid"
-                      ? "Pembayaran QRIS Anda sudah dikonfirmasi oleh penjual."
+                      ? `Pembayaran ${getCustomerPaymentMethodLabel(
+                          resolveCustomerOrderPaymentMethod(trackedOrder)
+                        )} Anda sudah dikonfirmasi oleh penjual.`
                       : trackedOrder.payment_status === "rejected"
                         ? "Pembayaran belum terverifikasi atau dibatalkan penjual. Silakan hubungi WhatsApp toko."
-                        : "Penjual sedang memeriksa pembayaran QRIS Anda. Halaman ini terupdate otomatis."}
+                        : `Penjual sedang memeriksa pembayaran ${getCustomerPaymentMethodLabel(
+                            resolveCustomerOrderPaymentMethod(trackedOrder)
+                          )} Anda. Halaman ini terupdate otomatis.`}
                   </p>
                 </div>
               </div>
@@ -500,22 +548,26 @@ export function CustomerOrderClient({
             ) : null}
 
             {settings?.poster_url ? (
-              <section className="glass-elevated rounded-2xl overflow-hidden">
-                <div className="bg-white">
-                  <Image
-                    src={settings.poster_url}
-                    alt={`Poster promo ${storefront.businessName}`}
-                    width={1200}
-                    height={1500}
-                    className="w-full h-auto max-h-[540px] object-contain mx-auto"
-                  />
-                </div>
+              <figure className="glass-elevated w-fit max-w-full mx-auto rounded-2xl overflow-hidden">
+                <Image
+                  src={settings.poster_url}
+                  alt={`Poster promo ${storefront.businessName}`}
+                  width={0}
+                  height={0}
+                  sizes="(max-width: 672px) 100vw, 672px"
+                  style={{
+                    width: "auto",
+                    height: "auto",
+                    maxWidth: "100%",
+                  }}
+                  className="block"
+                />
                 {settings.poster_caption ? (
-                  <p className="px-4 py-3 text-xs sm:text-sm font-medium text-[#1C1917] border-t border-[#1C1917]/10">
+                  <figcaption className="w-0 min-w-full px-4 py-3 text-xs sm:text-sm font-medium text-[#1C1917] border-t border-[#1C1917]/10">
                     {settings.poster_caption}
-                  </p>
+                  </figcaption>
                 ) : null}
-              </section>
+              </figure>
             ) : null}
 
             {settings && !settings.is_open ? (
@@ -545,7 +597,7 @@ export function CustomerOrderClient({
                 ) : null}
               </section>
             ) : (
-              <form onSubmit={handleSubmitQrisOrder} className="space-y-5">
+              <form onSubmit={handleSubmitDirectOrder} className="space-y-5">
                 {/* Flagship Single Product Card */}
                 <section className="glass-elevated rounded-2xl overflow-hidden">
                   <div className="grid grid-cols-1 sm:grid-cols-12">
@@ -674,123 +726,244 @@ export function CustomerOrderClient({
                   <div className="space-y-1">
                     <h2 className="text-base font-bold text-[#1C1917]">Metode Pembayaran</h2>
                     <p className="text-xs text-[#44403C]">
-                      Pemesanan langsung lewat web menggunakan QRIS. Untuk pembayaran tunai dapat memesan langsung lewat chat WhatsApp.
+                      Pilih Langsung Bayar (QRIS atau Transfer Bank), atau pesan Onsite lewat WhatsApp.
                     </p>
                   </div>
 
-                  {settings?.enable_qris !== false && settings?.enable_cash_chat !== false ? (
-                    <div className="grid grid-cols-2 gap-2">
+                  {directEnabled && onsiteEnabled ? (
+                    <div className="grid grid-cols-2 gap-2.5">
                       <button
                         type="button"
-                        onClick={() => setPayTab("qris")}
-                        className={`min-h-11 rounded-xl border px-3 py-2 inline-flex items-center justify-center gap-2 text-xs sm:text-sm font-bold transition-colors cursor-pointer ${
-                          payTab === "qris"
+                        onClick={() => setPayMode("direct")}
+                        className={`min-h-12 rounded-xl border px-3 py-2 flex flex-col items-center justify-center gap-0.5 text-center transition-colors cursor-pointer ${
+                          payMode === "direct"
                             ? "border-[#14532D] bg-[#14532D] text-white"
-                            : "border-[#1C1917]/20 bg-white text-[#1C1917]"
+                            : "border-[#1C1917]/20 bg-white text-[#1C1917] hover:bg-black/[0.02]"
                         }`}
                       >
-                        <QrCode size={18} weight="bold" aria-hidden="true" />
-                        <span>Bayar QRIS</span>
+                        <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold">
+                          <Wallet size={17} weight="bold" aria-hidden="true" />
+                          Langsung Bayar
+                        </span>
+                        <span
+                          className={`text-[11px] leading-tight ${
+                            payMode === "direct" ? "text-white/85" : "text-[#44403C]"
+                          }`}
+                        >
+                          QRIS / Transfer Bank
+                        </span>
                       </button>
+
                       <button
                         type="button"
-                        onClick={() => setPayTab("cash_chat")}
-                        className={`min-h-11 rounded-xl border px-3 py-2 inline-flex items-center justify-center gap-2 text-xs sm:text-sm font-bold transition-colors cursor-pointer ${
-                          payTab === "cash_chat"
+                        onClick={() => setPayMode("onsite")}
+                        className={`min-h-12 rounded-xl border px-3 py-2 flex flex-col items-center justify-center gap-0.5 text-center transition-colors cursor-pointer ${
+                          payMode === "onsite"
                             ? "border-[#B43D0A] bg-[#B43D0A] text-white"
-                            : "border-[#1C1917]/20 bg-white text-[#1C1917]"
+                            : "border-[#1C1917]/20 bg-white text-[#1C1917] hover:bg-black/[0.02]"
                         }`}
                       >
-                        <WhatsappLogo size={18} weight="bold" aria-hidden="true" />
-                        <span>Tunai (Chat WA)</span>
+                        <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold">
+                          <WhatsappLogo size={17} weight="bold" aria-hidden="true" />
+                          Onsite
+                        </span>
+                        <span
+                          className={`text-[11px] leading-tight ${
+                            payMode === "onsite" ? "text-white/85" : "text-[#44403C]"
+                          }`}
+                        >
+                          Bayar di Tempat (WA)
+                        </span>
                       </button>
                     </div>
                   ) : null}
 
-                  {payTab === "qris" && settings?.enable_qris !== false ? (
+                  {payMode === "direct" && directEnabled ? (
                     <div className="space-y-4">
-                      <div className="rounded-xl bg-white border border-[#1C1917]/15 p-4 text-center space-y-3">
-                        <div>
+                      {qrisEnabled && transferEnabled ? (
+                        <div className="space-y-1.5">
                           <p className="text-xs font-semibold text-[#44403C]">
-                            Silakan scan atau simpan QRIS untuk total:
+                            Pilih Cara Langsung Bayar:
                           </p>
-                          <p className="text-2xl font-extrabold text-[#14532D] tabular-nums">
-                            {formatRupiah(totalAmount)}
-                          </p>
-                        </div>
-
-                        {storefront.qrisImageUrl ? (
-                          <div className="space-y-2.5">
-                            <div className="mx-auto w-56 h-56 relative">
-                              <Image
-                                src={storefront.qrisImageUrl}
-                                alt={`QRIS ${storefront.businessName}`}
-                                fill
-                                sizes="224px"
-                                className="object-contain rounded-xl"
-                              />
-                            </div>
-                            <div className="flex flex-wrap items-center justify-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setQrisFullscreen(true)}
-                                className="min-h-10 inline-flex items-center gap-1.5 rounded-xl border border-[#14532D]/30 bg-[#14532D]/10 px-3 py-1.5 text-xs font-bold text-[#14532D] hover:bg-[#14532D]/15 cursor-pointer"
-                              >
-                                <ArrowsOutSimple size={15} weight="bold" aria-hidden="true" />
-                                Perbesar QRIS
-                              </button>
-                              <a
-                                href={storefront.qrisImageUrl}
-                                download={`QRIS-${storefront.businessName}.jpg`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="min-h-10 inline-flex items-center gap-1.5 rounded-xl border border-[#1C1917]/20 bg-white px-3 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-black/5"
-                              >
-                                <DownloadSimple size={15} weight="bold" aria-hidden="true" />
-                                Simpan Gambar QRIS
-                              </a>
-                            </div>
+                          <div className="grid grid-cols-2 gap-1.5 rounded-xl bg-black/[0.05] p-1">
+                            <button
+                              type="button"
+                              onClick={() => setDirectMethod("qris")}
+                              className={`min-h-10 rounded-lg px-3 py-1.5 inline-flex items-center justify-center gap-1.5 text-xs sm:text-sm font-bold transition-colors cursor-pointer ${
+                                directMethod === "qris"
+                                  ? "bg-white text-[#14532D] shadow-xs"
+                                  : "text-[#44403C] hover:text-[#1C1917]"
+                              }`}
+                            >
+                              <QrCode size={16} weight="bold" aria-hidden="true" />
+                              <span>QRIS</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDirectMethod("transfer")}
+                              className={`min-h-10 rounded-lg px-3 py-1.5 inline-flex items-center justify-center gap-1.5 text-xs sm:text-sm font-bold transition-colors cursor-pointer ${
+                                directMethod === "transfer"
+                                  ? "bg-white text-[#14532D] shadow-xs"
+                                  : "text-[#44403C] hover:text-[#1C1917]"
+                              }`}
+                            >
+                              <Bank size={16} weight="bold" aria-hidden="true" />
+                              <span>Transfer Bank</span>
+                            </button>
                           </div>
-                        ) : (
-                          <p className="text-xs text-[#B43D0A] bg-[#FEF3C7] rounded-xl p-3">
-                            Gambar QRIS toko belum diunggah oleh penjual.
-                          </p>
-                        )}
+                        </div>
+                      ) : null}
 
-                        <p className="text-xs text-[#44403C] leading-relaxed">
-                          {settings?.qris_instruction ||
-                            "Setelah berhasil transfer via QRIS, tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda."}
-                        </p>
-                      </div>
+                      {directMethod === "qris" && qrisEnabled ? (
+                        <div className="space-y-4">
+                          <div className="rounded-xl bg-white border border-[#1C1917]/15 p-4 text-center space-y-3">
+                            <div>
+                              <p className="text-xs font-semibold text-[#44403C]">
+                                Silakan scan atau simpan QRIS untuk total:
+                              </p>
+                              <p className="text-2xl font-extrabold text-[#14532D] tabular-nums">
+                                {formatRupiah(totalAmount)}
+                              </p>
+                            </div>
 
-                      <button
-                        type="submit"
-                        disabled={submitting || !storefront.qrisImageUrl}
-                        className="min-h-12 w-full rounded-xl bg-[#14532D] px-4 py-3 text-sm sm:text-base font-extrabold text-white hover:bg-[#166534] disabled:opacity-60 transition-colors cursor-pointer"
-                      >
-                        {submitting
-                          ? "Mengirim pesanan..."
-                          : `Konfirmasi Sudah Bayar (${formatRupiah(totalAmount)})`}
-                      </button>
+                            {storefront.qrisImageUrl ? (
+                              <div className="space-y-2.5">
+                                <div className="mx-auto w-56 h-56 relative">
+                                  <Image
+                                    src={storefront.qrisImageUrl}
+                                    alt={`QRIS ${storefront.businessName}`}
+                                    fill
+                                    sizes="224px"
+                                    className="object-contain rounded-xl"
+                                  />
+                                </div>
+                                <div className="flex flex-wrap items-center justify-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setQrisFullscreen(true)}
+                                    className="min-h-10 inline-flex items-center gap-1.5 rounded-xl border border-[#14532D]/30 bg-[#14532D]/10 px-3 py-1.5 text-xs font-bold text-[#14532D] hover:bg-[#14532D]/15 cursor-pointer"
+                                  >
+                                    <ArrowsOutSimple size={15} weight="bold" aria-hidden="true" />
+                                    Perbesar QRIS
+                                  </button>
+                                  <a
+                                    href={storefront.qrisImageUrl}
+                                    download={`QRIS-${storefront.businessName}.jpg`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="min-h-10 inline-flex items-center gap-1.5 rounded-xl border border-[#1C1917]/20 bg-white px-3 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-black/5"
+                                  >
+                                    <DownloadSimple size={15} weight="bold" aria-hidden="true" />
+                                    Simpan Gambar QRIS
+                                  </a>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="text-xs text-[#B43D0A] bg-[#FEF3C7] rounded-xl p-3">
+                                Gambar QRIS toko belum diunggah oleh penjual.
+                              </p>
+                            )}
+
+                            <p className="text-xs text-[#44403C] leading-relaxed">
+                              {settings?.qris_instruction ||
+                                "Setelah berhasil transfer via QRIS, tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda."}
+                            </p>
+                          </div>
+
+                          <button
+                            type="submit"
+                            disabled={submitting || !storefront.qrisImageUrl}
+                            className="min-h-12 w-full rounded-xl bg-[#14532D] px-4 py-3 text-sm sm:text-base font-extrabold text-white hover:bg-[#166534] disabled:opacity-60 transition-colors cursor-pointer"
+                          >
+                            {submitting
+                              ? "Mengirim pesanan..."
+                              : `Konfirmasi Sudah Bayar (${formatRupiah(totalAmount)})`}
+                          </button>
+                        </div>
+                      ) : transferEnabled ? (
+                        <div className="space-y-4">
+                          <div className="rounded-xl bg-white border border-[#1C1917]/15 p-4 space-y-3.5">
+                            <div className="text-center space-y-0.5">
+                              <p className="text-xs font-semibold text-[#44403C]">
+                                Silakan transfer tepat sesuai nominal:
+                              </p>
+                              <p className="text-2xl font-extrabold text-[#14532D] tabular-nums">
+                                {formatRupiah(totalAmount)}
+                              </p>
+                            </div>
+
+                            {storefront.bankAccountNumber.trim() ? (
+                              <div className="rounded-xl border border-[#14532D]/20 bg-[#14532D]/[0.04] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                <div className="space-y-0.5 min-w-0">
+                                  <p className="text-xs font-bold uppercase tracking-wide text-[#44403C]">
+                                    {storefront.bankName || "Transfer Bank"}
+                                  </p>
+                                  <p className="text-lg sm:text-xl font-extrabold text-[#14532D] tabular-nums tracking-wide break-all">
+                                    {storefront.bankAccountNumber}
+                                  </p>
+                                  {storefront.bankAccountHolder ? (
+                                    <p className="text-xs font-semibold text-[#1C1917]">
+                                      a.n. {storefront.bankAccountHolder}
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleCopyAccountNumber();
+                                  }}
+                                  className="min-h-10 shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl border border-[#14532D]/30 bg-white px-3.5 py-2 text-xs font-bold text-[#14532D] hover:bg-[#14532D]/5 cursor-pointer"
+                                >
+                                  {copiedRek ? (
+                                    <Check size={15} weight="bold" aria-hidden="true" />
+                                  ) : (
+                                    <Copy size={15} weight="bold" aria-hidden="true" />
+                                  )}
+                                  <span>{copiedRek ? "Tersalin!" : "Salin Rekening"}</span>
+                                </button>
+                              </div>
+                            ) : (
+                              <p className="text-xs text-[#B43D0A] bg-[#FEF3C7] rounded-xl p-3 text-center">
+                                Nomor rekening bank toko belum diatur oleh penjual.
+                              </p>
+                            )}
+
+                            <p className="text-xs text-[#44403C] leading-relaxed text-center">
+                              {settings?.transfer_instruction ||
+                                "Transfer tepat sesuai nominal ke rekening bank di atas, lalu tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda."}
+                            </p>
+                          </div>
+
+                          <button
+                            type="submit"
+                            disabled={submitting || !storefront.bankAccountNumber.trim()}
+                            className="min-h-12 w-full rounded-xl bg-[#14532D] px-4 py-3 text-sm sm:text-base font-extrabold text-white hover:bg-[#166534] disabled:opacity-60 transition-colors cursor-pointer"
+                          >
+                            {submitting
+                              ? "Mengirim pesanan..."
+                              : `Konfirmasi Sudah Bayar (${formatRupiah(totalAmount)})`}
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
-                  ) : settings?.enable_cash_chat !== false ? (
+                  ) : onsiteEnabled ? (
                     <div className="rounded-xl bg-white border border-[#1C1917]/15 p-4 space-y-3">
                       <p className="text-sm font-bold text-[#1C1917]">
-                        Pemesanan Tunai Dilayani via Chat WhatsApp
+                        Pemesanan Onsite via Chat WhatsApp
                       </p>
                       <p className="text-xs text-[#44403C] leading-relaxed">
                         {settings?.cash_instruction ||
-                          "Untuk menjaga ketersediaan stok, pesanan dengan pembayaran tunai tidak diproses lewat form web. Klik tombol di bawah untuk langsung chat penjual dengan detail pesanan Anda."}
+                          "Untuk menjaga ketersediaan stok, pemesanan onsite (bayar di tempat) langsung dikonfirmasi lewat chat WhatsApp dengan detail pesanan Anda."}
                       </p>
                       {storeWaNumber ? (
                         <a
-                          href={buildCashChatUrl()}
+                          href={buildOnsiteChatUrl()}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="min-h-12 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#B43D0A] px-4 py-3 text-sm font-extrabold text-white hover:bg-[#9A3412] transition-colors"
                         >
                           <WhatsappLogo size={20} weight="bold" aria-hidden="true" />
-                          Pesan Tunai via WhatsApp ({formatRupiah(totalAmount)})
+                          Pesan Onsite via WhatsApp ({formatRupiah(totalAmount)})
                         </a>
                       ) : (
                         <p className="text-xs text-[#B43D0A]">

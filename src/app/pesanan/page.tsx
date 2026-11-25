@@ -86,6 +86,15 @@ export default async function CustomerOrdersPage() {
         isOwner={isOwner}
         businessId={businessId}
         businessName={session.profile.business_name}
+        bankSummary={
+          session.profile.bank_account_number
+            ? `${session.profile.bank_name || "Bank"} · ${session.profile.bank_account_number}${
+                session.profile.bank_account_holder
+                  ? ` (a.n. ${session.profile.bank_account_holder})`
+                  : ""
+              }`
+            : ""
+        }
         initialOrders={initialOrders}
         initialSettings={initialSettings}
         products={(productsRaw as Product[] | null) ?? []}

@@ -9,7 +9,8 @@ export const revalidate = 0;
 
 export const metadata = {
   title: "Pesan Menu | Nummie",
-  description: "Pesan menu Nummie dengan pembayaran QRIS mudah tanpa perlu login.",
+  description:
+    "Pesan menu Nummie lewat Langsung Bayar (QRIS / Transfer Bank) atau Onsite via WhatsApp.",
 };
 
 const uuidSchema = z.string().uuid();

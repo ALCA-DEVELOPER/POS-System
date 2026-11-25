@@ -241,7 +241,7 @@ export interface CustomerOrder {
   quantity: number;
   unit_price: number;
   total_amount: number;
-  payment_method: "qris";
+  payment_method: "qris" | "transfer";
   payment_status: CustomerPaymentStatus;
   fulfillment_status: CustomerFulfillmentStatus;
   notes: string;
@@ -273,8 +273,10 @@ export interface StorefrontSettings {
   custom_description: string;
   custom_price: number | null;
   enable_qris: boolean;
+  enable_transfer: boolean;
   enable_cash_chat: boolean;
   qris_instruction: string;
+  transfer_instruction: string;
   cash_instruction: string;
   whatsapp_number: string;
 }
@@ -286,6 +288,9 @@ export interface PublicStorefrontData {
   address: string;
   logoUrl: string | null;
   qrisImageUrl: string | null;
+  bankName: string;
+  bankAccountNumber: string;
+  bankAccountHolder: string;
   product: PublicStorefrontProduct | null;
   settings: StorefrontSettings;
   ordersTableMissing?: boolean;

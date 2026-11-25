@@ -15,8 +15,17 @@ const updateStorefrontSchema = z.object({
   custom_description: z.string().trim().max(500),
   custom_price: z.number().min(0).nullable(),
   enable_qris: z.boolean(),
+  enable_transfer: z.boolean().optional().default(true),
   enable_cash_chat: z.boolean(),
   qris_instruction: z.string().trim().max(500),
+  transfer_instruction: z
+    .string()
+    .trim()
+    .max(500)
+    .optional()
+    .default(
+      "Transfer tepat sesuai nominal ke rekening bank di atas, lalu tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda."
+    ),
   cash_instruction: z.string().trim().max(500),
   whatsapp_number: z.string().trim().max(30),
 });
@@ -55,7 +64,7 @@ export async function PUT(request: Request) {
     }
 
     const admin = createAdminClient();
-    const { data: saved, error } = await admin
+    let { data: saved, error } = await admin
       .from("storefront_settings")
       .upsert(
         {
@@ -66,6 +75,37 @@ export async function PUT(request: Request) {
       )
       .select("*")
       .single();
+
+    if (
+      error &&
+      (error.message.includes("enable_transfer") ||
+        error.message.includes("transfer_instruction"))
+    ) {
+      const {
+        enable_transfer: omittedEnableTransfer,
+        transfer_instruction: omittedTransferInstruction,
+        ...legacyData
+      } = parsed.data;
+      const retry = await admin
+        .from("storefront_settings")
+        .upsert(
+          {
+            business_id: profile.business_id,
+            ...legacyData,
+          },
+          { onConflict: "business_id" }
+        )
+        .select("*")
+        .single();
+      saved = retry.data
+        ? {
+            ...retry.data,
+            enable_transfer: omittedEnableTransfer,
+            transfer_instruction: omittedTransferInstruction,
+          }
+        : null;
+      error = retry.error;
+    }
 
     if (error || !saved) {
       if (isMissingTableError(error, "storefront_settings")) {

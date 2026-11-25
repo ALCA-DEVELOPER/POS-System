@@ -23,6 +23,11 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { formatDateId, formatRupiah, normalizeWhatsAppPhone } from "@/lib/format";
 import { broadcastBusinessUpdate } from "@/lib/realtime";
+import {
+  getCustomerPaymentMethodLabel,
+  resolveCustomerOrderPaymentMethod,
+  stripInternalPaymentTag,
+} from "@/lib/customer-order-payment";
 import type {
   CustomerOrder,
   Product,
@@ -42,7 +47,7 @@ const CUSTOMER_ORDERS_MIGRATION_SQL = `CREATE TABLE IF NOT EXISTS public.custome
   quantity INTEGER NOT NULL CHECK (quantity > 0),
   unit_price NUMERIC(14,2) NOT NULL CHECK (unit_price >= 0),
   total_amount NUMERIC(14,2) NOT NULL CHECK (total_amount >= 0),
-  payment_method TEXT NOT NULL DEFAULT 'qris' CHECK (payment_method IN ('qris')),
+  payment_method TEXT NOT NULL DEFAULT 'qris' CHECK (payment_method IN ('qris', 'transfer')),
   payment_status TEXT NOT NULL DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'rejected')),
   fulfillment_status TEXT NOT NULL DEFAULT 'pending' CHECK (fulfillment_status IN ('pending', 'preparing', 'ready', 'completed', 'cancelled')),
   notes TEXT NOT NULL DEFAULT '',
@@ -87,9 +92,11 @@ CREATE TABLE IF NOT EXISTS public.storefront_settings (
   custom_description TEXT NOT NULL DEFAULT '',
   custom_price NUMERIC(14,2) CHECK (custom_price IS NULL OR custom_price >= 0),
   enable_qris BOOLEAN NOT NULL DEFAULT true,
+  enable_transfer BOOLEAN NOT NULL DEFAULT true,
   enable_cash_chat BOOLEAN NOT NULL DEFAULT true,
   qris_instruction TEXT NOT NULL DEFAULT 'Setelah berhasil transfer via QRIS, tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda.',
-  cash_instruction TEXT NOT NULL DEFAULT 'Untuk menjaga ketersediaan stok, pesanan dengan pembayaran tunai tidak diproses lewat form web. Klik tombol di bawah untuk langsung chat penjual.',
+  transfer_instruction TEXT NOT NULL DEFAULT 'Transfer tepat sesuai nominal ke rekening bank di atas, lalu tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda.',
+  cash_instruction TEXT NOT NULL DEFAULT 'Untuk menjaga ketersediaan stok, pemesanan onsite (bayar di tempat) langsung dikonfirmasi lewat chat WhatsApp dengan detail pesanan Anda.',
   whatsapp_number TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -149,6 +156,7 @@ interface CustomerOrdersClientProps {
   isOwner: boolean;
   businessId: string;
   businessName: string;
+  bankSummary?: string;
   initialOrders: CustomerOrder[];
   initialSettings: StorefrontSettings;
   products: Product[];
@@ -159,6 +167,7 @@ export function CustomerOrdersClient({
   isOwner,
   businessId,
   businessName,
+  bankSummary = "",
   initialOrders,
   initialSettings,
   products,
@@ -194,9 +203,15 @@ export function CustomerOrdersClient({
       : ""
   );
   const [enableQris, setEnableQris] = useState(initialSettings.enable_qris);
+  const [enableTransfer, setEnableTransfer] = useState(
+    initialSettings.enable_transfer ?? true
+  );
   const [enableCashChat, setEnableCashChat] = useState(initialSettings.enable_cash_chat);
   const [qrisInstruction, setQrisInstruction] = useState(
     initialSettings.qris_instruction
+  );
+  const [transferInstruction, setTransferInstruction] = useState(
+    initialSettings.transfer_instruction
   );
   const [cashInstruction, setCashInstruction] = useState(
     initialSettings.cash_instruction
@@ -224,8 +239,10 @@ export function CustomerOrdersClient({
         : ""
     );
     setEnableQris(initialSettings.enable_qris);
+    setEnableTransfer(initialSettings.enable_transfer ?? true);
     setEnableCashChat(initialSettings.enable_cash_chat);
     setQrisInstruction(initialSettings.qris_instruction);
+    setTransferInstruction(initialSettings.transfer_instruction);
     setCashInstruction(initialSettings.cash_instruction);
     setWhatsappNumber(initialSettings.whatsapp_number);
   }, [initialSettings]);
@@ -249,8 +266,10 @@ export function CustomerOrdersClient({
         custom_description: customDescription.trim(),
         custom_price: parsedPrice,
         enable_qris: enableQris,
+        enable_transfer: enableTransfer,
         enable_cash_chat: enableCashChat,
         qris_instruction: qrisInstruction.trim(),
+        transfer_instruction: transferInstruction.trim(),
         cash_instruction: cashInstruction.trim(),
         whatsapp_number: whatsappNumber.trim(),
       }),
@@ -439,12 +458,15 @@ export function CustomerOrdersClient({
   const buildCustomerWaLink = (order: CustomerOrder) => {
     const wa = normalizeWhatsAppPhone(order.customer_phone);
     if (!wa) return null;
+    const methodLabel = getCustomerPaymentMethodLabel(
+      resolveCustomerOrderPaymentMethod(order)
+    );
     const text =
       order.fulfillment_status === "ready"
         ? `Halo Kak ${order.customer_name}, pesanan ${order.order_number} (${order.quantity}x ${order.product_name}) di ${businessName || "Nummie"} SUDAH JADI dan siap diambil ya!`
         : order.payment_status === "paid"
-          ? `Halo Kak ${order.customer_name}, pembayaran QRIS pesanan ${order.order_number} sudah kami terima dan sedang dibuat ya.`
-          : `Halo Kak ${order.customer_name}, mengenai pesanan ${order.order_number} (${order.quantity}x ${order.product_name}) total ${formatRupiah(order.total_amount)}, bisa bantu kirim bukti bayar QRIS-nya?`;
+          ? `Halo Kak ${order.customer_name}, pembayaran ${methodLabel} pesanan ${order.order_number} sudah kami terima dan sedang dibuat ya.`
+          : `Halo Kak ${order.customer_name}, mengenai pesanan ${order.order_number} (${order.quantity}x ${order.product_name}) total ${formatRupiah(order.total_amount)}, bisa bantu kirim bukti bayar ${methodLabel}-nya?`;
     return `https://wa.me/${wa}?text=${encodeURIComponent(text)}`;
   };
 
@@ -667,13 +689,20 @@ export function CustomerOrdersClient({
 
             <div className="flex flex-col sm:flex-row items-start gap-4">
               {posterUrl ? (
-                <div className="w-full sm:w-56 rounded-2xl border border-[#1C1917]/15 bg-white overflow-hidden shrink-0">
+                <div className="w-fit max-w-full sm:max-w-60 rounded-2xl border border-[#1C1917]/15 bg-white overflow-hidden shrink-0">
                   <Image
                     src={posterUrl}
                     alt="Pratinjau poster halaman pembeli"
-                    width={480}
-                    height={600}
-                    className="w-full h-auto max-h-64 object-contain"
+                    width={0}
+                    height={0}
+                    sizes="(max-width: 640px) 100vw, 240px"
+                    style={{
+                      width: "auto",
+                      height: "auto",
+                      maxWidth: "100%",
+                      maxHeight: "18rem",
+                    }}
+                    className="block"
                   />
                 </div>
               ) : (
@@ -820,7 +849,7 @@ export function CustomerOrdersClient({
               Metode Pembayaran & WhatsApp Tujuan
             </h2>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <label className="min-h-11 rounded-xl border border-[#1C1917]/15 bg-white px-3.5 py-2.5 flex items-center gap-2.5 text-sm font-semibold text-[#1C1917] cursor-pointer">
                 <input
                   type="checkbox"
@@ -828,7 +857,17 @@ export function CustomerOrdersClient({
                   onChange={(e) => setEnableQris(e.target.checked)}
                   className="w-4 h-4 accent-[#14532D]"
                 />
-                <span>Aktifkan Bayar QRIS (Pesan di Web)</span>
+                <span>Langsung Bayar: QRIS</span>
+              </label>
+
+              <label className="min-h-11 rounded-xl border border-[#1C1917]/15 bg-white px-3.5 py-2.5 flex items-center gap-2.5 text-sm font-semibold text-[#1C1917] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={enableTransfer}
+                  onChange={(e) => setEnableTransfer(e.target.checked)}
+                  className="w-4 h-4 accent-[#14532D]"
+                />
+                <span>Langsung Bayar: Transfer Bank</span>
               </label>
 
               <label className="min-h-11 rounded-xl border border-[#1C1917]/15 bg-white px-3.5 py-2.5 flex items-center gap-2.5 text-sm font-semibold text-[#1C1917] cursor-pointer">
@@ -838,9 +877,23 @@ export function CustomerOrdersClient({
                   onChange={(e) => setEnableCashChat(e.target.checked)}
                   className="w-4 h-4 accent-[#B43D0A]"
                 />
-                <span>Aktifkan Pesan Tunai via Chat WA</span>
+                <span>Onsite (Chat WA)</span>
               </label>
             </div>
+
+            {enableTransfer ? (
+              <p className="text-xs text-[#44403C] bg-black/[0.04] rounded-xl px-3.5 py-2.5">
+                Rekening Transfer Bank aktif:{" "}
+                <strong className="text-[#1C1917]">
+                  {bankSummary || "Belum diatur"}
+                </strong>
+                . Ubah nomor rekening melalui menu{" "}
+                <Link href="/pengaturan-bisnis" className="font-semibold text-[#14532D] underline">
+                  Pengaturan Bisnis
+                </Link>
+                .
+              </p>
+            ) : null}
 
             <div className="space-y-1.5">
               <label htmlFor="sfQrisInstr" className="block text-xs font-semibold text-[#1C1917]">
@@ -856,8 +909,21 @@ export function CustomerOrdersClient({
             </div>
 
             <div className="space-y-1.5">
+              <label htmlFor="sfTransferInstr" className="block text-xs font-semibold text-[#1C1917]">
+                Teks Petunjuk Transfer Bank
+              </label>
+              <textarea
+                id="sfTransferInstr"
+                rows={2}
+                value={transferInstruction}
+                onChange={(e) => setTransferInstruction(e.target.value)}
+                className="w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 py-2.5 text-sm text-[#1C1917]"
+              />
+            </div>
+
+            <div className="space-y-1.5">
               <label htmlFor="sfCashInstr" className="block text-xs font-semibold text-[#1C1917]">
-                Teks Petunjuk Bayar Tunai (Chat WA)
+                Teks Petunjuk Onsite (Chat WA)
               </label>
               <textarea
                 id="sfCashInstr"
@@ -933,6 +999,10 @@ export function CustomerOrdersClient({
           {filtered.map((order) => {
             const isBusy = busyId === order.id;
             const waLink = buildCustomerWaLink(order);
+            const methodLabel = getCustomerPaymentMethodLabel(
+              resolveCustomerOrderPaymentMethod(order)
+            );
+            const cleanNotes = stripInternalPaymentTag(order.notes);
 
             return (
               <article
@@ -956,10 +1026,10 @@ export function CustomerOrdersClient({
                         }`}
                       >
                         {order.payment_status === "paid"
-                          ? "Sudah Bayar (QRIS)"
+                          ? `Sudah Bayar (${methodLabel})`
                           : order.payment_status === "rejected"
                             ? "Dibatalkan"
-                            : "Belum Validasi Bayar"}
+                            : `Belum Validasi (${methodLabel})`}
                       </span>
 
                       <span
@@ -1001,9 +1071,9 @@ export function CustomerOrdersClient({
                       <strong>{order.quantity}x</strong> {order.product_name}
                     </p>
 
-                    {order.notes ? (
+                    {cleanNotes ? (
                       <p className="text-xs text-[#44403C] bg-black/5 rounded-lg px-2.5 py-1.5 inline-block">
-                        Catatan: {order.notes}
+                        Catatan: {cleanNotes}
                       </p>
                     ) : null}
 
@@ -1013,7 +1083,7 @@ export function CustomerOrdersClient({
                   </div>
 
                   <div className="text-left sm:text-right shrink-0">
-                    <p className="text-[11px] text-[#44403C]">Total QRIS</p>
+                    <p className="text-[11px] text-[#44403C]">Total {methodLabel}</p>
                     <p className="text-xl font-extrabold text-[#14532D] tabular-nums">
                       {formatRupiah(order.total_amount)}
                     </p>

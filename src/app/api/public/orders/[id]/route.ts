@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveCustomerOrderPaymentMethod } from "@/lib/customer-order-payment";
 
 const uuidSchema = z.string().uuid();
 
@@ -17,7 +18,7 @@ export async function GET(
   const { data, error } = await admin
     .from("customer_orders")
     .select(
-      "id, order_number, customer_name, customer_phone, product_name, quantity, unit_price, total_amount, payment_status, fulfillment_status, notes, paid_verified_at, ready_at, created_at"
+      "id, order_number, customer_name, customer_phone, product_name, quantity, unit_price, total_amount, payment_method, payment_status, fulfillment_status, notes, paid_verified_at, ready_at, created_at"
     )
     .eq("id", id)
     .maybeSingle();
@@ -29,5 +30,10 @@ export async function GET(
     return NextResponse.json({ error: "Pesanan tidak ditemukan" }, { status: 404 });
   }
 
-  return NextResponse.json({ order: data });
+  return NextResponse.json({
+    order: {
+      ...data,
+      payment_method: resolveCustomerOrderPaymentMethod(data),
+    },
+  });
 }

@@ -117,6 +117,7 @@ export async function recordValidatedCustomerOrderSale(
     totalAmount: number;
     customerName: string;
     customerPhone: string;
+    paymentMethod?: "qris" | "transfer";
     webOrderNumber: string;
   }
 ): Promise<string> {
@@ -130,6 +131,7 @@ export async function recordValidatedCustomerOrderSale(
     totalAmount,
     customerName,
     customerPhone,
+    paymentMethod = "qris",
     webOrderNumber,
   } = params;
 
@@ -175,7 +177,7 @@ export async function recordValidatedCustomerOrderSale(
       hpp_total: hppTotal,
       amount_paid: totalAmount,
       change_amount: 0,
-      payment_method: "qris",
+      payment_method: paymentMethod,
       order_type: "online",
       customer_phone: customerPhone || null,
       notes: customerName ? `${customerName} (${webOrderNumber})` : webOrderNumber,
