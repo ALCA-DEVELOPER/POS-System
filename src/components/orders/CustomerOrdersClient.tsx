@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowSquareOut,
@@ -151,6 +151,27 @@ BEGIN
 END;
 $$;`;
 
+function serializeStorefrontSettings(s: StorefrontSettings): string {
+  return JSON.stringify({
+    is_open: s.is_open,
+    closed_message: s.closed_message,
+    poster_url: s.poster_url,
+    poster_caption: s.poster_caption,
+    announcement: s.announcement,
+    featured_product_id: s.featured_product_id ?? "",
+    custom_title: s.custom_title,
+    custom_description: s.custom_description,
+    custom_price: s.custom_price ?? null,
+    enable_qris: s.enable_qris,
+    enable_transfer: s.enable_transfer ?? true,
+    enable_cash_chat: s.enable_cash_chat,
+    qris_instruction: s.qris_instruction,
+    transfer_instruction: s.transfer_instruction,
+    cash_instruction: s.cash_instruction,
+    whatsapp_number: s.whatsapp_number,
+  });
+}
+
 interface CustomerOrdersClientProps {
   tableMissing: boolean;
   isOwner: boolean;
@@ -219,12 +240,25 @@ export function CustomerOrdersClient({
   const [whatsappNumber, setWhatsappNumber] = useState(initialSettings.whatsapp_number);
   const [uploadingPoster, setUploadingPoster] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const settingsDirtyRef = useRef(false);
+  const lastSyncedSettingsRef = useRef(
+    serializeStorefrontSettings(initialSettings)
+  );
 
   useEffect(() => {
     setOrders(initialOrders);
   }, [initialOrders]);
 
   useEffect(() => {
+    const incomingSerialized = serializeStorefrontSettings(initialSettings);
+    if (incomingSerialized === lastSyncedSettingsRef.current) {
+      return;
+    }
+    if (settingsDirtyRef.current) {
+      return;
+    }
+
+    lastSyncedSettingsRef.current = incomingSerialized;
     setIsOpen(initialSettings.is_open);
     setClosedMessage(initialSettings.closed_message);
     setPosterUrl(initialSettings.poster_url);
@@ -278,7 +312,10 @@ export function CustomerOrdersClient({
     if (!res.ok) {
       throw new Error(json?.error ?? "Gagal menyimpan pengaturan halaman pembeli.");
     }
-    return json.settings as StorefrontSettings;
+    const saved = json.settings as StorefrontSettings;
+    settingsDirtyRef.current = false;
+    lastSyncedSettingsRef.current = serializeStorefrontSettings(saved);
+    return saved;
   };
 
   const handlePosterUpload = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -609,7 +646,13 @@ export function CustomerOrdersClient({
       ) : null}
 
       {activeSection === "storefront" && isOwner ? (
-        <form onSubmit={handleSaveStorefrontSettings} className="space-y-5 max-w-4xl">
+        <form
+          onSubmit={handleSaveStorefrontSettings}
+          onChangeCapture={() => {
+            settingsDirtyRef.current = true;
+          }}
+          className="space-y-5 max-w-4xl"
+        >
           {/* Status Toko & Pengumuman */}
           <section className="glass-panel rounded-2xl p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -618,13 +661,16 @@ export function CustomerOrdersClient({
                   Status Buka / Tutup Pemesanan Online
                 </h2>
                 <p className="text-xs text-[#44403C]">
-                  Matikan sementara jika stok habis atau toko sedang libur agar pembeli tidak bisa checkout QRIS.
+                  Matikan sementara jika stok habis atau toko sedang libur agar pembeli tidak bisa membuat pesanan baru.
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-black/5 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setIsOpen(true)}
+                  onClick={() => {
+                    settingsDirtyRef.current = true;
+                    setIsOpen(true);
+                  }}
                   className={`min-h-10 rounded-lg px-3.5 text-xs font-bold cursor-pointer ${
                     isOpen ? "bg-[#14532D] text-white" : "text-[#44403C]"
                   }`}
@@ -633,7 +679,10 @@ export function CustomerOrdersClient({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsOpen(false)}
+                  onClick={() => {
+                    settingsDirtyRef.current = true;
+                    setIsOpen(false);
+                  }}
                   className={`min-h-10 rounded-lg px-3.5 text-xs font-bold cursor-pointer ${
                     !isOpen ? "bg-[#B91C1C] text-white" : "text-[#44403C]"
                   }`}
