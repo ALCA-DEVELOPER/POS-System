@@ -26,6 +26,7 @@ import type { UserRole } from "@/types/database";
 import { cn } from "@/lib/utils";
 import { BUSINESS_SYNC_DOM_EVENT } from "@/lib/realtime";
 import { BusinessRealtimeSync } from "@/components/layout/BusinessRealtimeSync";
+import { BrandLogo } from "@/components/ui/BrandLogo";
 
 interface NavItem {
   href: string;
@@ -172,7 +173,6 @@ function BusinessBrandAvatar({
 }) {
   const boxClass = size === "sm" ? "w-9 h-9 text-xs" : "w-10 h-10 text-sm";
   const px = size === "sm" ? 36 : 40;
-  const fallback = (businessName || "KK").trim().slice(0, 2).toUpperCase() || "KK";
 
   if (logoUrl) {
     return (
@@ -193,16 +193,7 @@ function BusinessBrandAvatar({
     );
   }
 
-  return (
-    <div
-      className={cn(
-        boxClass,
-        "rounded-xl bg-[#14532D] text-white flex items-center justify-center font-extrabold tracking-tight shrink-0"
-      )}
-    >
-      {fallback}
-    </div>
-  );
+  return <BrandLogo variant="mark" size={px} decorative />;
 }
 
 interface AppShellProps {
