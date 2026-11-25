@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle, Receipt, Storefront, Trash } from "@phosphor-icons/react";
 import {
   formatDateId,
@@ -9,6 +9,7 @@ import {
   ORDER_TYPE_LABELS,
   PAYMENT_METHOD_LABELS,
 } from "@/lib/format";
+import { broadcastBusinessUpdate } from "@/lib/realtime";
 import type { Order, StorePosConfig } from "@/types/database";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState, ErrorState } from "@/components/ui/StatePanel";
@@ -27,6 +28,10 @@ export function PosHistoryClient({
 }: PosHistoryClientProps) {
   const [orders, setOrders] = useState<Order[]>(initialOrders);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  useEffect(() => {
+    setOrders(initialOrders);
+  }, [initialOrders]);
   const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -49,6 +54,7 @@ export function PosHistoryClient({
       }
 
       setOrders((prev) => prev.filter((o) => o.id !== deleteTarget.id));
+      void broadcastBusinessUpdate(storeConfig.business_id, "orders");
       setSuccessMsg(
         `Transaksi ${deleteTarget.order_number} dihapus. Stok bahan & kas shift sudah disesuaikan otomatis.`
       );

@@ -22,6 +22,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import type { UserRole } from "@/types/database";
 import { cn } from "@/lib/utils";
+import { BusinessRealtimeSync } from "@/components/layout/BusinessRealtimeSync";
 
 interface NavItem {
   href: string;
@@ -316,7 +317,10 @@ export function AppShell({
                 </p>
               </div>
             </div>
-            {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
+            <div className="shrink-0 flex items-center gap-2">
+              <BusinessRealtimeSync />
+              {headerAction ? <div>{headerAction}</div> : null}
+            </div>
           </div>
         </header>
 

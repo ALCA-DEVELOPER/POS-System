@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowDownLeft,
@@ -19,6 +19,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { computeCapitalSummary } from "@/lib/analytics";
 import { formatDateId, formatRupiah } from "@/lib/format";
+import { broadcastBusinessUpdate } from "@/lib/realtime";
 import type { CapitalEntry, CapitalEntryType } from "@/types/database";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState, ErrorState } from "@/components/ui/StatePanel";
@@ -84,6 +85,10 @@ export function CapitalManagerClient({
   const router = useRouter();
   const [entries, setEntries] = useState<CapitalEntry[]>(initialEntries);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setEntries(initialEntries);
+  }, [initialEntries]);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
 
@@ -238,6 +243,7 @@ export function CapitalManagerClient({
       }
 
       setFormOpen(false);
+      void broadcastBusinessUpdate(businessId, "capital");
       router.refresh();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Gagal menyimpan catatan modal.");
@@ -267,6 +273,7 @@ export function CapitalManagerClient({
       setEntries((prev) => prev.filter((row) => row.id !== deleteTarget.id));
       setSuccessMsg("Catatan modal usaha berhasil dihapus dan saldo kas diperbarui.");
       setDeleteTarget(null);
+      void broadcastBusinessUpdate(businessId, "capital");
       router.refresh();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Gagal menghapus catatan modal.");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   ArrowsLeftRight,
   ClockCounterClockwise,
@@ -14,6 +14,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { diffDaysFromTodayWib } from "@/lib/analytics";
 import { formatDateId, formatNumber, formatRupiah } from "@/lib/format";
+import { broadcastBusinessUpdate } from "@/lib/realtime";
 import type {
   Ingredient,
   IngredientUnit,
@@ -56,6 +57,14 @@ export function StockManagerClient({
   const [ingredients, setIngredients] =
     useState<Array<Ingredient | KitchenIngredient>>(initialIngredients);
   const [movements, setMovements] = useState<StockMovement[]>(initialMovements);
+
+  useEffect(() => {
+    setIngredients(initialIngredients);
+  }, [initialIngredients]);
+
+  useEffect(() => {
+    setMovements(initialMovements);
+  }, [initialMovements]);
   const [activeTab, setActiveTab] = useState<"stock" | "movements">("stock");
   const [search, setSearch] = useState("");
   const [onlyCritical, setOnlyCritical] = useState(false);
@@ -203,6 +212,7 @@ export function StockManagerClient({
 
       setIngModalOpen(false);
       await reloadData();
+      void broadcastBusinessUpdate(businessId, "stock");
     } catch (err) {
       setErrorBanner(err instanceof Error ? err.message : "Gagal menyimpan bahan baku.");
     } finally {
@@ -221,6 +231,7 @@ export function StockManagerClient({
       return;
     }
     await reloadData();
+    void broadcastBusinessUpdate(businessId, "stock");
   };
 
   const handleSaveOpname = async (e: FormEvent) => {
@@ -239,6 +250,7 @@ export function StockManagerClient({
       setOpnameTarget(null);
       setOpnameNotes("");
       await reloadData();
+      void broadcastBusinessUpdate(businessId, "stock");
     } catch (err) {
       setErrorBanner(err instanceof Error ? err.message : "Gagal menyimpan opname.");
     } finally {
@@ -262,6 +274,7 @@ export function StockManagerClient({
       setWasteTarget(null);
       setWasteQty("");
       await reloadData();
+      void broadcastBusinessUpdate(businessId, "stock");
     } catch (err) {
       setErrorBanner(err instanceof Error ? err.message : "Gagal mencatat bahan sisa.");
     } finally {

@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Camera, CheckCircle, Receipt, Trash } from "@phosphor-icons/react";
 import { formatDateId, formatRupiah } from "@/lib/format";
+import { broadcastBusinessUpdate } from "@/lib/realtime";
 import type { Expense, ExpenseCategory } from "@/types/database";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState, ErrorState } from "@/components/ui/StatePanel";
@@ -25,6 +26,10 @@ interface ExpensesListClientProps {
 export function ExpensesListClient({ initialExpenses }: ExpensesListClientProps) {
   const [expenses, setExpenses] = useState<Expense[]>(initialExpenses);
   const [categoryFilter, setCategoryFilter] = useState<"Semua" | ExpenseCategory>("Semua");
+
+  useEffect(() => {
+    setExpenses(initialExpenses);
+  }, [initialExpenses]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [receiptModalUrl, setReceiptModalUrl] = useState<string | null>(null);
@@ -77,6 +82,7 @@ export function ExpensesListClient({ initialExpenses }: ExpensesListClientProps)
       }
 
       setExpenses((prev) => prev.filter((e) => e.id !== deleteTarget.id));
+      void broadcastBusinessUpdate(deleteTarget.user_id, "expenses");
       setSuccessMsg(
         "Catatan pengeluaran berhasil dihapus. Penambahan stok terkait (jika ada) ikut ditarik kembali."
       );

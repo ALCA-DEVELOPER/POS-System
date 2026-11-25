@@ -6,6 +6,9 @@ import { SchemaMissingNotice } from "@/components/ui/SchemaMissingNotice";
 import { PosHistoryClient } from "@/components/pos/PosHistoryClient";
 import type { Order, StorePosConfig } from "@/types/database";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export const metadata = {
   title: "Riwayat Transaksi POS",
 };

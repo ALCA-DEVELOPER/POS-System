@@ -12,6 +12,7 @@ import {
 } from "@/lib/analytics";
 import { formatDateId, formatRupiah, PAYMENT_METHOD_LABELS } from "@/lib/format";
 import { downloadFinancialPdf } from "@/lib/export/pdf-report";
+import { broadcastBusinessUpdate, BUSINESS_SYNC_DOM_EVENT } from "@/lib/realtime";
 import type { CapitalEntry, Expense, Order } from "@/types/database";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/StatePanel";
@@ -78,9 +79,9 @@ export function ReportsClient({
   const [deletingItem, setDeletingItem] = useState(false);
 
   const loadPeriod = useCallback(
-    async (start: string, end: string) => {
+    async (start: string, end: string, silent = false) => {
       if (!start || !end) return;
-      setLoading(true);
+      if (!silent) setLoading(true);
       setErrorMsg(null);
       try {
         const supabase = createClient();
@@ -129,9 +130,11 @@ export function ReportsClient({
             : ((capData as CapitalEntry[] | null) ?? [])
         );
       } catch (err) {
-        setErrorMsg(err instanceof Error ? err.message : "Gagal memuat laporan.");
+        if (!silent) {
+          setErrorMsg(err instanceof Error ? err.message : "Gagal memuat laporan.");
+        }
       } finally {
-        setLoading(false);
+        if (!silent) setLoading(false);
       }
     },
     [businessId]
@@ -147,9 +150,27 @@ export function ReportsClient({
   };
 
   useEffect(() => {
+    if (preset === "month") {
+      setOrders(initialOrders);
+      setExpenses(initialExpenses);
+      setCapitals(initialCapitals);
+    }
+  }, [preset, initialOrders, initialExpenses, initialCapitals]);
+
+  useEffect(() => {
     if (preset === "custom" && startDate && endDate && startDate <= endDate) {
       void loadPeriod(startDate, endDate);
     }
+  }, [preset, startDate, endDate, loadPeriod]);
+
+  useEffect(() => {
+    const onSync = () => {
+      if (preset !== "month" && startDate && endDate && startDate <= endDate) {
+        void loadPeriod(startDate, endDate, true);
+      }
+    };
+    window.addEventListener(BUSINESS_SYNC_DOM_EVENT, onSync);
+    return () => window.removeEventListener(BUSINESS_SYNC_DOM_EVENT, onSync);
   }, [preset, startDate, endDate, loadPeriod]);
 
   const summary = useMemo(
@@ -616,8 +637,10 @@ export function ReportsClient({
                   }
                   if (deleteTarget.kind === "order") {
                     setOrders((prev) => prev.filter((o) => o.id !== deleteTarget.id));
+                    void broadcastBusinessUpdate(businessId, "orders");
                   } else {
                     setExpenses((prev) => prev.filter((e) => e.id !== deleteTarget.id));
+                    void broadcastBusinessUpdate(businessId, "expenses");
                   }
                   setDeleteTarget(null);
                 } catch {

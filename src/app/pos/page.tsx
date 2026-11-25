@@ -5,6 +5,9 @@ import { SchemaMissingNotice } from "@/components/ui/SchemaMissingNotice";
 import { PosTerminalClient } from "@/components/pos/PosTerminalClient";
 import type { CashierShift, Product, StorePosConfig } from "@/types/database";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export const metadata = {
   title: "Kasir POS",
 };

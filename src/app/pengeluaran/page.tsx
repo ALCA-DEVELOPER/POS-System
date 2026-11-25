@@ -5,6 +5,9 @@ import { SchemaMissingNotice } from "@/components/ui/SchemaMissingNotice";
 import { ExpensesListClient } from "@/components/expenses/ExpensesListClient";
 import type { Expense } from "@/types/database";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export const metadata = {
   title: "Daftar Pengeluaran",
 };

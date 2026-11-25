@@ -17,6 +17,7 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { createClient } from "@/lib/supabase/client";
+import { broadcastBusinessUpdate } from "@/lib/realtime";
 import type { Profile, UserRole } from "@/types/database";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState } from "@/components/ui/StatePanel";
@@ -127,6 +128,9 @@ export function BusinessSettingsClient({
         .update(updateField)
         .eq("id", initialProfile.business_id);
 
+      void broadcastBusinessUpdate(initialProfile.business_id, "settings");
+      router.refresh();
+
       setFeedback({
         type: "ok",
         text: kind === "logo" ? "Logo usaha berhasil diperbarui." : "QRIS toko berhasil diperbarui.",
@@ -167,6 +171,8 @@ export function BusinessSettingsClient({
         return;
       }
 
+      void broadcastBusinessUpdate(initialProfile.business_id, "settings");
+      router.refresh();
       setFeedback({ type: "ok", text: "Profil bisnis & pengaturan pembayaran tersimpan." });
     } catch {
       setFeedback({ type: "err", text: "Gagal menyimpan pengaturan bisnis." });

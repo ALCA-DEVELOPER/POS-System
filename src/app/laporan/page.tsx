@@ -6,6 +6,9 @@ import { SchemaMissingNotice } from "@/components/ui/SchemaMissingNotice";
 import { ReportsClient } from "@/components/reports/ReportsClient";
 import type { CapitalEntry, Expense, Order } from "@/types/database";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export const metadata = {
   title: "Laporan Keuangan",
 };

@@ -21,6 +21,7 @@ import {
 } from "@phosphor-icons/react";
 import { createClient } from "@/lib/supabase/client";
 import { formatRupiah, ORDER_TYPE_LABELS } from "@/lib/format";
+import { broadcastBusinessUpdate } from "@/lib/realtime";
 import type {
   CashierShift,
   Order,
@@ -63,6 +64,10 @@ export function PosTerminalClient({
 }: PosTerminalClientProps) {
   const [products, setProducts] = useState<Product[]>(initialProducts);
   const [activeShift, setActiveShift] = useState<CashierShift | null>(initialShift);
+
+  useEffect(() => {
+    setProducts(initialProducts);
+  }, [initialProducts]);
   const [category, setCategory] = useState<"Semua" | ProductCategory>("Semua");
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartEntry[]>([]);
@@ -312,6 +317,7 @@ export function PosTerminalClient({
       setCart([]);
       setDiscountInput("0");
       setCompletedOrder(hydratedOrder);
+      void broadcastBusinessUpdate(storeConfig.business_id, "orders");
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Gagal menyimpan pesanan.");
     } finally {

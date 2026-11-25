@@ -17,6 +17,7 @@ import { createClient } from "@/lib/supabase/client";
 import { compressImageFile } from "@/lib/image-compress";
 import { toJakartaDateKey } from "@/lib/analytics";
 import { formatNumber, formatRupiah } from "@/lib/format";
+import { broadcastBusinessUpdate } from "@/lib/realtime";
 import type { ExpenseCategory, Ingredient, IngredientUnit } from "@/types/database";
 import { ErrorState } from "@/components/ui/StatePanel";
 
@@ -264,6 +265,7 @@ export function ScanReceiptClient({ businessId, ingredients }: ScanReceiptClient
 
       if (error) throw new Error(error.message);
 
+      void broadcastBusinessUpdate(businessId, "expenses");
       setSavedOk(true);
       router.push("/pengeluaran");
       router.refresh();

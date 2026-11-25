@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   MagnifyingGlass,
   PencilSimple,
@@ -13,6 +13,7 @@ import {
 } from "@phosphor-icons/react";
 import { createClient } from "@/lib/supabase/client";
 import { formatNumber, formatRupiah } from "@/lib/format";
+import { broadcastBusinessUpdate } from "@/lib/realtime";
 import type { Ingredient, ProductCategory, ProductWithHpp } from "@/types/database";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState, ErrorState } from "@/components/ui/StatePanel";
@@ -37,6 +38,10 @@ export function MenuHppClient({
 }: MenuHppClientProps) {
   const [products, setProducts] = useState<ProductWithHpp[]>(initialProducts);
   const [categoryFilter, setCategoryFilter] = useState<"Semua" | ProductCategory>("Semua");
+
+  useEffect(() => {
+    setProducts(initialProducts);
+  }, [initialProducts]);
   const [search, setSearch] = useState("");
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
@@ -238,6 +243,7 @@ export function MenuHppClient({
 
       setModalOpen(false);
       await reloadProducts();
+      void broadcastBusinessUpdate(businessId, "menu");
     } catch (err) {
       setErrorBanner(err instanceof Error ? err.message : "Gagal menyimpan menu & resep.");
     } finally {
@@ -252,6 +258,7 @@ export function MenuHppClient({
       .update({ is_active: !product.is_active })
       .eq("id", product.id);
     await reloadProducts();
+    void broadcastBusinessUpdate(businessId, "menu");
   };
 
   const handleDeleteProduct = async (id: string) => {
@@ -264,6 +271,7 @@ export function MenuHppClient({
       return;
     }
     await reloadProducts();
+    void broadcastBusinessUpdate(businessId, "menu");
   };
 
   return (

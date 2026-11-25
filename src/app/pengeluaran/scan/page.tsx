@@ -5,6 +5,9 @@ import { SchemaMissingNotice } from "@/components/ui/SchemaMissingNotice";
 import { ScanReceiptClient } from "@/components/expenses/ScanReceiptClient";
 import type { Ingredient } from "@/types/database";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export const metadata = {
   title: "Scan Struk Belanja",
 };
