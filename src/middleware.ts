@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { UserRole } from "@/types/database";
 
 const PUBLIC_PATHS = [
+  "/pesan",
   "/login",
   "/register",
   "/lupa-password",
@@ -65,16 +66,23 @@ export async function middleware(request: NextRequest) {
     (p) => pathname === p || pathname.startsWith(p + "/")
   );
 
+  if (pathname.startsWith("/api/public/")) {
+    return response;
+  }
+
   if (!user) {
     if (isPublic) return response;
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Autentikasi diperlukan" }, { status: 401 });
     }
+    if (pathname === "/") {
+      const orderUrl = request.nextUrl.clone();
+      orderUrl.pathname = "/pesan";
+      return NextResponse.redirect(orderUrl);
+    }
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
-    if (pathname !== "/") {
-      loginUrl.searchParams.set("next", pathname);
-    }
+    loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
@@ -127,7 +135,13 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(targetUrl);
   }
 
-  if ((pathname === "/pos" || pathname.startsWith("/pos/")) && role === "kitchen") {
+  if (
+    (pathname === "/pos" ||
+      pathname.startsWith("/pos/") ||
+      pathname === "/pesanan" ||
+      pathname.startsWith("/pesanan/")) &&
+    role === "kitchen"
+  ) {
     const targetUrl = request.nextUrl.clone();
     targetUrl.pathname = "/stok";
     return NextResponse.redirect(targetUrl);

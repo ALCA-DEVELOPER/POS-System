@@ -221,3 +221,52 @@ export interface CapitalEntry {
   created_at: string;
   updated_at: string;
 }
+
+export type CustomerPaymentStatus = "pending" | "paid" | "rejected";
+export type CustomerFulfillmentStatus =
+  | "pending"
+  | "preparing"
+  | "ready"
+  | "completed"
+  | "cancelled";
+
+export interface CustomerOrder {
+  id: string;
+  business_id: string;
+  order_number: string;
+  customer_name: string;
+  customer_phone: string;
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
+  total_amount: number;
+  payment_method: "qris";
+  payment_status: CustomerPaymentStatus;
+  fulfillment_status: CustomerFulfillmentStatus;
+  notes: string;
+  linked_order_id: string | null;
+  paid_verified_at: string | null;
+  ready_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PublicStorefrontProduct {
+  id: string;
+  name: string;
+  price: number;
+  category: ProductCategory;
+  image_url: string | null;
+}
+
+export interface PublicStorefrontData {
+  businessId: string;
+  businessName: string;
+  phone: string;
+  address: string;
+  logoUrl: string | null;
+  qrisImageUrl: string | null;
+  product: PublicStorefrontProduct | null;
+  ordersTableMissing?: boolean;
+}

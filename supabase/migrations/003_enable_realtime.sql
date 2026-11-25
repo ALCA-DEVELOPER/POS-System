@@ -7,6 +7,7 @@ DO $$
 DECLARE
   v_table TEXT;
   v_tables TEXT[] := ARRAY[
+    'customer_orders',
     'capital_entries',
     'orders',
     'expenses',

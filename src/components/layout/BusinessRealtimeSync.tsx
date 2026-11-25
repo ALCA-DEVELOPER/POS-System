@@ -101,6 +101,16 @@ export function BusinessRealtimeSync({ businessId: propBusinessId }: BusinessRea
       )
       .on(
         "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "customer_orders",
+          filter: `business_id=eq.${businessId}`,
+        },
+        () => triggerRefresh("customer_orders")
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "orders", filter },
         () => triggerRefresh("orders")
       )

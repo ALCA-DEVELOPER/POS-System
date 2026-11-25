@@ -13,6 +13,7 @@ import {
   ForkKnife,
   GearSix,
   ClockCounterClockwise,
+  ShoppingBag,
   SignOut,
   List,
   X,
@@ -29,7 +30,7 @@ interface NavItem {
   label: string;
   shortLabel: string;
   group: "Operasional" | "Keuangan & Menu";
-  icon: "home" | "pos" | "scan" | "stock" | "report" | "menu" | "expense" | "capital" | "settings" | "history";
+  icon: "home" | "pos" | "orders" | "scan" | "stock" | "report" | "menu" | "expense" | "capital" | "settings" | "history";
   accent?: boolean;
 }
 
@@ -40,6 +41,13 @@ function getNavItems(role: UserRole): {
   if (role === "cashier") {
     const items: NavItem[] = [
       { href: "/pos", label: "Kasir POS", shortLabel: "Kasir", group: "Operasional", icon: "pos" },
+      {
+        href: "/pesanan",
+        label: "Pesanan Pembeli",
+        shortLabel: "Pesanan",
+        group: "Operasional",
+        icon: "orders",
+      },
       {
         href: "/pos/riwayat",
         label: "Riwayat Shift",
@@ -61,6 +69,13 @@ function getNavItems(role: UserRole): {
   const all: NavItem[] = [
     { href: "/dashboard", label: "Beranda Keuangan", shortLabel: "Beranda", group: "Operasional", icon: "home" },
     { href: "/pos", label: "Kasir POS", shortLabel: "Kasir", group: "Operasional", icon: "pos" },
+    {
+      href: "/pesanan",
+      label: "Pesanan Pembeli",
+      shortLabel: "Pesanan",
+      group: "Operasional",
+      icon: "orders",
+    },
     {
       href: "/pengeluaran/scan",
       label: "Scan Struk AI",
@@ -117,6 +132,8 @@ function NavIcon({ name, active }: { name: NavItem["icon"]; active: boolean }) {
       return <House size={size} weight={weight} aria-hidden="true" />;
     case "pos":
       return <CashRegister size={size} weight={weight} aria-hidden="true" />;
+    case "orders":
+      return <ShoppingBag size={size} weight={weight} aria-hidden="true" />;
     case "scan":
       return <Receipt size={size} weight={weight} aria-hidden="true" />;
     case "stock":
