@@ -8,6 +8,7 @@ DECLARE
   v_table TEXT;
   v_tables TEXT[] := ARRAY[
     'customer_orders',
+    'storefront_settings',
     'capital_entries',
     'orders',
     'expenses',

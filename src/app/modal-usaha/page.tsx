@@ -53,6 +53,7 @@ export default async function BusinessCapitalPage() {
       role={session.profile.role}
       businessName={session.profile.business_name}
       userName={session.profile.full_name || session.profile.owner_name}
+      logoUrl={session.profile.logo_url}
       pageTitle="Modal Usaha & Balik Modal"
     >
       <CapitalManagerClient

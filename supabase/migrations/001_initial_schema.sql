@@ -213,6 +213,26 @@ CREATE TABLE IF NOT EXISTS public.customer_orders (
 
 CREATE INDEX IF NOT EXISTS idx_customer_orders_biz_created ON public.customer_orders(business_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS public.storefront_settings (
+  business_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
+  is_open BOOLEAN NOT NULL DEFAULT true,
+  closed_message TEXT NOT NULL DEFAULT 'Maaf, pemesanan online sedang tutup sementara. Silakan hubungi WhatsApp kami.',
+  poster_url TEXT,
+  poster_caption TEXT NOT NULL DEFAULT '',
+  announcement TEXT NOT NULL DEFAULT '',
+  featured_product_id UUID REFERENCES public.products(id) ON DELETE SET NULL,
+  custom_title TEXT NOT NULL DEFAULT '',
+  custom_description TEXT NOT NULL DEFAULT '',
+  custom_price NUMERIC(14,2) CHECK (custom_price IS NULL OR custom_price >= 0),
+  enable_qris BOOLEAN NOT NULL DEFAULT true,
+  enable_cash_chat BOOLEAN NOT NULL DEFAULT true,
+  qris_instruction TEXT NOT NULL DEFAULT 'Setelah berhasil transfer via QRIS, tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda.',
+  cash_instruction TEXT NOT NULL DEFAULT 'Untuk menjaga ketersediaan stok, pesanan dengan pembayaran tunai tidak diproses lewat form web. Klik tombol di bawah untuk langsung chat penjual.',
+  whatsapp_number TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ----------------------------------------------------------------------------
 -- 2. UPDATED_AT TRIGGER & AUTH PROFILE BOOTSTRAP
 -- ----------------------------------------------------------------------------
@@ -250,6 +270,11 @@ CREATE TRIGGER trg_capital_entries_updated_at
 DROP TRIGGER IF EXISTS trg_customer_orders_updated_at ON public.customer_orders;
 CREATE TRIGGER trg_customer_orders_updated_at
   BEFORE UPDATE ON public.customer_orders
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_storefront_settings_updated_at ON public.storefront_settings;
+CREATE TRIGGER trg_storefront_settings_updated_at
+  BEFORE UPDATE ON public.storefront_settings
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -347,6 +372,7 @@ ALTER TABLE public.expense_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stock_movements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.capital_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customer_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.storefront_settings ENABLE ROW LEVEL SECURITY;
 
 -- PROFILES
 DROP POLICY IF EXISTS profiles_select ON public.profiles;
@@ -542,6 +568,25 @@ CREATE POLICY customer_orders_team_all ON public.customer_orders
   )
   WITH CHECK (
     public.get_my_role() IN ('owner', 'cashier')
+    AND business_id = public.get_my_business_id()
+  );
+
+-- STOREFRONT SETTINGS (Team read, Owner write)
+DROP POLICY IF EXISTS storefront_settings_team_select ON public.storefront_settings;
+CREATE POLICY storefront_settings_team_select ON public.storefront_settings
+  FOR SELECT USING (
+    public.get_my_role() IN ('owner', 'cashier')
+    AND business_id = public.get_my_business_id()
+  );
+
+DROP POLICY IF EXISTS storefront_settings_owner_write ON public.storefront_settings;
+CREATE POLICY storefront_settings_owner_write ON public.storefront_settings
+  FOR ALL USING (
+    public.get_my_role() = 'owner'
+    AND business_id = public.get_my_business_id()
+  )
+  WITH CHECK (
+    public.get_my_role() = 'owner'
     AND business_id = public.get_my_business_id()
   );
 

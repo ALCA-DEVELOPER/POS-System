@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -23,6 +24,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import type { UserRole } from "@/types/database";
 import { cn } from "@/lib/utils";
+import { BUSINESS_SYNC_DOM_EVENT } from "@/lib/realtime";
 import { BusinessRealtimeSync } from "@/components/layout/BusinessRealtimeSync";
 
 interface NavItem {
@@ -159,10 +161,55 @@ const ROLE_LABELS: Record<UserRole, string> = {
   kitchen: "Staf Dapur",
 };
 
+function BusinessBrandAvatar({
+  logoUrl,
+  businessName,
+  size = "md",
+}: {
+  logoUrl: string | null;
+  businessName: string;
+  size?: "md" | "sm";
+}) {
+  const boxClass = size === "sm" ? "w-9 h-9 text-xs" : "w-10 h-10 text-sm";
+  const px = size === "sm" ? 36 : 40;
+  const fallback = (businessName || "KK").trim().slice(0, 2).toUpperCase() || "KK";
+
+  if (logoUrl) {
+    return (
+      <div
+        className={cn(
+          boxClass,
+          "rounded-xl bg-white border border-[#1C1917]/10 overflow-hidden shrink-0 flex items-center justify-center"
+        )}
+      >
+        <Image
+          src={logoUrl}
+          alt={businessName || "Logo usaha"}
+          width={px}
+          height={px}
+          className="w-full h-full object-cover"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        boxClass,
+        "rounded-xl bg-[#14532D] text-white flex items-center justify-center font-extrabold tracking-tight shrink-0"
+      )}
+    >
+      {fallback}
+    </div>
+  );
+}
+
 interface AppShellProps {
   role: UserRole;
   businessName: string;
   userName: string;
+  logoUrl?: string | null;
   pageTitle: string;
   headerAction?: ReactNode;
   children: ReactNode;
@@ -173,6 +220,7 @@ export function AppShell({
   role,
   businessName,
   userName,
+  logoUrl,
   pageTitle,
   headerAction,
   children,
@@ -182,6 +230,32 @@ export function AppShell({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [liveLogoUrl, setLiveLogoUrl] = useState<string | null>(logoUrl ?? null);
+  const [liveBusinessName, setLiveBusinessName] = useState(businessName);
+
+  useEffect(() => {
+    setLiveLogoUrl(logoUrl ?? null);
+  }, [logoUrl]);
+
+  useEffect(() => {
+    setLiveBusinessName(businessName);
+  }, [businessName]);
+
+  useEffect(() => {
+    const onLocalSync = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ logoUrl?: string | null; businessName?: string }>
+      ).detail;
+      if (detail?.logoUrl !== undefined) {
+        setLiveLogoUrl(detail.logoUrl);
+      }
+      if (detail?.businessName !== undefined) {
+        setLiveBusinessName(detail.businessName);
+      }
+    };
+    window.addEventListener(BUSINESS_SYNC_DOM_EVENT, onLocalSync);
+    return () => window.removeEventListener(BUSINESS_SYNC_DOM_EVENT, onLocalSync);
+  }, []);
 
   const { bottom, all } = getNavItems(role);
 
@@ -236,12 +310,14 @@ export function AppShell({
         <div className="glass-elevated rounded-2xl p-4 flex flex-col h-full justify-between gap-4 overflow-y-auto">
           <div className="space-y-5">
             <Link href={bottom[0]?.href ?? "/pos"} className="flex items-center gap-3 px-1">
-              <div className="w-10 h-10 rounded-xl bg-[#14532D] text-white flex items-center justify-center font-extrabold text-sm tracking-tight shrink-0">
-                KK
-              </div>
+              <BusinessBrandAvatar
+                logoUrl={liveLogoUrl}
+                businessName={liveBusinessName}
+                size="md"
+              />
               <div className="min-w-0">
                 <p className="text-sm font-extrabold text-[#1C1917] truncate">
-                  {businessName || "KulinerKas"}
+                  {liveBusinessName || "KulinerKas"}
                 </p>
                 <p className="text-xs text-[#44403C] truncate">
                   {userName || "Pengguna"} ({ROLE_LABELS[role]})
@@ -330,7 +406,7 @@ export function AppShell({
                   {pageTitle}
                 </h1>
                 <p className="text-xs text-[#44403C] truncate md:hidden">
-                  {businessName || "KulinerKas"} · {ROLE_LABELS[role]}
+                  {liveBusinessName || "KulinerKas"} · {ROLE_LABELS[role]}
                 </p>
               </div>
             </div>
@@ -403,12 +479,14 @@ export function AppShell({
             <div className="space-y-5">
               <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#1C1917]/10">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-9 h-9 rounded-xl bg-[#14532D] text-white flex items-center justify-center font-extrabold text-xs">
-                    KK
-                  </div>
+                  <BusinessBrandAvatar
+                    logoUrl={liveLogoUrl}
+                    businessName={liveBusinessName}
+                    size="sm"
+                  />
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-[#1C1917] truncate">
-                      {businessName || "KulinerKas"}
+                      {liveBusinessName || "KulinerKas"}
                     </p>
                     <p className="text-xs text-[#44403C] truncate">
                       {userName} ({ROLE_LABELS[role]})

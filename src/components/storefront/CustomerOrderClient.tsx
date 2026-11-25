@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   ArrowsOutSimple,
@@ -9,11 +9,11 @@ import {
   Clock,
   DownloadSimple,
   MapPin,
+  Megaphone,
   Minus,
   Package,
   Plus,
   QrCode,
-  SignIn,
   Storefront,
   WarningCircle,
   WhatsappLogo,
@@ -43,7 +43,6 @@ type TrackedOrderView = Pick<
   | "total_amount"
   | "payment_status"
   | "fulfillment_status"
-  | "notes"
   | "paid_verified_at"
   | "ready_at"
   | "created_at"
@@ -53,14 +52,17 @@ export function CustomerOrderClient({
   storefront,
   initialTrackedOrder,
 }: CustomerOrderClientProps) {
+  const router = useRouter();
+  const settings = storefront?.settings;
   const [trackedOrder, setTrackedOrder] = useState<TrackedOrderView | null>(
     initialTrackedOrder
   );
-  const [payTab, setPayTab] = useState<"qris" | "cash_chat">("qris");
+  const [payTab, setPayTab] = useState<"qris" | "cash_chat">(
+    settings?.enable_qris === false && settings?.enable_cash_chat ? "cash_chat" : "qris"
+  );
   const [quantity, setQuantity] = useState(1);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
-  const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [qrisFullscreen, setQrisFullscreen] = useState(false);
@@ -75,6 +77,33 @@ export function CustomerOrderClient({
     () => normalizeWhatsAppPhone(storefront?.phone ?? ""),
     [storefront?.phone]
   );
+
+  // Sinkronkan payTab bila admin menonaktifkan QRIS atau Tunai Chat
+  useEffect(() => {
+    if (!settings) return;
+    if (!settings.enable_qris && settings.enable_cash_chat && payTab === "qris") {
+      setPayTab("cash_chat");
+    } else if (settings.enable_qris && !settings.enable_cash_chat && payTab === "cash_chat") {
+      setPayTab("qris");
+    }
+  }, [settings, payTab]);
+
+  // Dengarkan pembaruan poster/pengaturan storefront secara real-time dari admin
+  useEffect(() => {
+    const bizId = storefront?.businessId;
+    if (!bizId) return;
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`kulinerkas-storefront-${bizId}`)
+      .on("broadcast", { event: "storefront_update" }, () => {
+        router.refresh();
+      })
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [storefront?.businessId, router]);
 
   // Pulihkan pesanan terakhir pembeli dari browser jika kembali tanpa parameter query
   useEffect(() => {
@@ -176,7 +205,6 @@ export function CustomerOrderClient({
           customer_name: customerName,
           customer_phone: customerPhone,
           quantity,
-          notes,
         }),
       });
       const json = await res.json();
@@ -202,7 +230,6 @@ export function CustomerOrderClient({
   const handleResetNewOrder = () => {
     setTrackedOrder(null);
     setQuantity(1);
-    setNotes("");
     setErrorMsg(null);
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(LAST_ORDER_STORAGE_KEY);
@@ -213,12 +240,11 @@ export function CustomerOrderClient({
   const buildCashChatUrl = () => {
     const nama = customerName.trim() || "Pembeli";
     const hp = customerPhone.trim() ? ` (${customerPhone.trim()})` : "";
-    const catatan = notes.trim() ? `\nCatatan: ${notes.trim()}` : "";
     const msg = [
       `Halo Kak ${storefront?.businessName || "Nummie"}, saya ${nama}${hp}.`,
       `Saya mau pesan:`,
       `- ${quantity}x ${product?.name || "Paket Lumpia Ubi Ungu (coklat & keju)"} (${formatRupiah(totalAmount)})`,
-      `Metode bayar: TUNAI (chat konfirmasi).${catatan}`,
+      `Metode bayar: TUNAI (chat konfirmasi).`,
     ].join("\n");
     return `https://wa.me/${storeWaNumber}?text=${encodeURIComponent(msg)}`;
   };
@@ -245,15 +271,8 @@ export function CustomerOrderClient({
             Toko Sedang Disiapkan
           </h1>
           <p className="text-sm text-[#44403C]">
-            Menu pemesanan online belum aktif saat ini. Silakan kembali sebentar lagi atau masuk sebagai admin.
+            Menu pemesanan online belum aktif saat ini. Silakan kembali sebentar lagi ya.
           </p>
-          <Link
-            href="/login"
-            className="min-h-11 inline-flex items-center justify-center gap-2 rounded-xl bg-[#14532D] px-5 py-2.5 text-sm font-bold text-white"
-          >
-            <SignIn size={18} weight="bold" aria-hidden="true" />
-            Masuk Admin
-          </Link>
         </div>
       </main>
     );
@@ -263,7 +282,7 @@ export function CustomerOrderClient({
     <div className="min-h-dvh flex flex-col">
       {/* Top Storefront Bar */}
       <header className="sticky top-0 z-30 px-3 pt-3 sm:px-6 sm:pt-4">
-        <div className="glass-elevated max-w-2xl mx-auto rounded-2xl px-4 py-3 flex items-center justify-between gap-3">
+        <div className="glass-elevated max-w-2xl mx-auto rounded-2xl px-4 py-3 flex items-center gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-[#14532D] text-white flex items-center justify-center font-extrabold text-sm shrink-0 overflow-hidden">
               {storefront.logoUrl ? (
@@ -290,14 +309,6 @@ export function CustomerOrderClient({
               ) : null}
             </div>
           </div>
-
-          <Link
-            href="/login"
-            className="min-h-10 shrink-0 inline-flex items-center gap-1.5 rounded-xl border border-[#1C1917]/15 bg-white/85 px-3 text-xs font-semibold text-[#1C1917] hover:bg-white transition-colors"
-          >
-            <SignIn size={15} weight="bold" aria-hidden="true" />
-            <span>Admin</span>
-          </Link>
         </div>
       </header>
 
@@ -340,11 +351,6 @@ export function CustomerOrderClient({
                 <p className="text-sm font-bold text-[#1C1917]">
                   {trackedOrder.quantity}x {trackedOrder.product_name}
                 </p>
-                {trackedOrder.notes ? (
-                  <p className="text-xs text-[#44403C] mt-0.5">
-                    Catatan: {trackedOrder.notes}
-                  </p>
-                ) : null}
               </div>
               <p className="text-lg font-extrabold text-[#14532D] tabular-nums shrink-0">
                 {formatRupiah(trackedOrder.total_amount)}
@@ -405,10 +411,10 @@ export function CustomerOrderClient({
                   </p>
                   <p className="text-xs text-[#44403C]">
                     {trackedOrder.payment_status === "paid"
-                      ? "Pembayaran QRIS Anda sudah dikonfirmasi oleh admin."
+                      ? "Pembayaran QRIS Anda sudah dikonfirmasi oleh penjual."
                       : trackedOrder.payment_status === "rejected"
-                        ? "Pembayaran belum terverifikasi atau dibatalkan admin. Silakan hubungi WhatsApp toko."
-                        : "Admin sedang memeriksa pembayaran QRIS Anda. Halaman ini terupdate otomatis."}
+                        ? "Pembayaran belum terverifikasi atau dibatalkan penjual. Silakan hubungi WhatsApp toko."
+                        : "Penjual sedang memeriksa pembayaran QRIS Anda. Halaman ini terupdate otomatis."}
                   </p>
                 </div>
               </div>
@@ -478,267 +484,329 @@ export function CustomerOrderClient({
             </div>
           </section>
         ) : (
-          <form onSubmit={handleSubmitQrisOrder} className="space-y-5">
-            {/* Flagship Single Product Card */}
-            <section className="glass-elevated rounded-2xl overflow-hidden">
-              <div className="grid grid-cols-1 sm:grid-cols-12">
-                <div className="sm:col-span-5 relative aspect-[4/3] sm:aspect-auto sm:min-h-[220px] bg-white">
-                  {product.image_url ? (
-                    <Image
-                      src={product.image_url}
-                      alt={product.name}
-                      fill
-                      priority
-                      sizes="(max-width: 640px) 100vw, 280px"
-                      className="object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-2xl font-extrabold text-[#14532D]">
-                      LU
-                    </div>
-                  )}
-                </div>
-
-                <div className="sm:col-span-7 p-5 flex flex-col justify-between gap-4">
-                  <div className="space-y-1.5">
-                    <span className="inline-block rounded-full bg-[#14532D]/10 px-2.5 py-0.5 text-xs font-bold text-[#14532D]">
-                      {product.category}
-                    </span>
-                    <h1 className="text-lg sm:text-xl font-extrabold text-[#1C1917] leading-snug">
-                      {product.name}
-                    </h1>
-                    <p className="text-2xl font-extrabold text-[#14532D] tabular-nums">
-                      {formatRupiah(product.price)}
-                      <span className="text-xs font-medium text-[#44403C]"> / paket</span>
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3 pt-2 border-t border-[#1C1917]/10">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-[#44403C]">Jumlah:</span>
-                      <div className="inline-flex items-center gap-1.5 rounded-xl bg-black/5 p-1">
-                        <button
-                          type="button"
-                          onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                          aria-label="Kurangi jumlah"
-                          className="w-9 h-9 rounded-lg bg-white border border-[#1C1917]/15 inline-flex items-center justify-center text-[#1C1917] cursor-pointer"
-                        >
-                          <Minus size={16} weight="bold" aria-hidden="true" />
-                        </button>
-                        <span className="w-8 text-center text-sm font-extrabold text-[#1C1917] tabular-nums">
-                          {quantity}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setQuantity((q) => Math.min(100, q + 1))}
-                          aria-label="Tambah jumlah"
-                          className="w-9 h-9 rounded-lg bg-[#14532D] text-white inline-flex items-center justify-center cursor-pointer"
-                        >
-                          <Plus size={16} weight="bold" aria-hidden="true" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="text-right">
-                      <span className="block text-[11px] text-[#44403C]">Total Bayar</span>
-                      <span className="text-lg font-extrabold text-[#B43D0A] tabular-nums">
-                        {formatRupiah(totalAmount)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* Buyer Info Card */}
-            <section className="glass-panel rounded-2xl p-5 space-y-4">
-              <h2 className="text-base font-bold text-[#1C1917]">Data Pemesan</h2>
-
-              {errorMsg ? (
-                <div
-                  role="alert"
-                  className="rounded-xl border border-[#B91C1C]/30 bg-red-50 px-3.5 py-2.5 text-xs text-[#B91C1C] flex items-center gap-2"
-                >
-                  <WarningCircle size={16} weight="bold" aria-hidden="true" />
-                  <span>{errorMsg}</span>
-                </div>
-              ) : null}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label htmlFor="buyerName" className="block text-xs font-semibold text-[#1C1917]">
-                    Nama Lengkap
-                  </label>
-                  <input
-                    id="buyerName"
-                    type="text"
-                    required
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="Contoh: Budi"
-                    className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917]"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label htmlFor="buyerPhone" className="block text-xs font-semibold text-[#1C1917]">
-                    No. HP / WhatsApp
-                  </label>
-                  <input
-                    id="buyerPhone"
-                    type="tel"
-                    required
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="0812xxxxxxxx"
-                    className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917] tabular-nums"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label htmlFor="buyerNotes" className="block text-xs font-semibold text-[#1C1917]">
-                  Catatan Tambahan (Opsional)
-                </label>
-                <input
-                  id="buyerNotes"
-                  type="text"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Contoh: Diambil jam 16.00 / cokelat lebih banyak"
-                  className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917]"
+          <div className="space-y-5">
+            {settings?.announcement ? (
+              <div className="glass-panel rounded-2xl px-4 py-3 flex items-start gap-2.5 border border-[#14532D]/20 bg-emerald-50/75">
+                <Megaphone
+                  size={18}
+                  weight="duotone"
+                  className="text-[#14532D] shrink-0 mt-0.5"
+                  aria-hidden="true"
                 />
-              </div>
-            </section>
-
-            {/* Payment Method Section */}
-            <section className="glass-panel rounded-2xl p-5 space-y-4">
-              <div className="space-y-1">
-                <h2 className="text-base font-bold text-[#1C1917]">Metode Pembayaran</h2>
-                <p className="text-xs text-[#44403C]">
-                  Pemesanan langsung lewat web menggunakan QRIS. Untuk pembayaran tunai dapat memesan langsung lewat chat WhatsApp.
+                <p className="text-xs sm:text-sm font-semibold text-[#1C1917] leading-relaxed">
+                  {settings.announcement}
                 </p>
               </div>
+            ) : null}
 
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPayTab("qris")}
-                  className={`min-h-11 rounded-xl border px-3 py-2 inline-flex items-center justify-center gap-2 text-xs sm:text-sm font-bold transition-colors cursor-pointer ${
-                    payTab === "qris"
-                      ? "border-[#14532D] bg-[#14532D] text-white"
-                      : "border-[#1C1917]/20 bg-white text-[#1C1917]"
-                  }`}
-                >
-                  <QrCode size={18} weight="bold" aria-hidden="true" />
-                  <span>Bayar QRIS</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPayTab("cash_chat")}
-                  className={`min-h-11 rounded-xl border px-3 py-2 inline-flex items-center justify-center gap-2 text-xs sm:text-sm font-bold transition-colors cursor-pointer ${
-                    payTab === "cash_chat"
-                      ? "border-[#B43D0A] bg-[#B43D0A] text-white"
-                      : "border-[#1C1917]/20 bg-white text-[#1C1917]"
-                  }`}
-                >
-                  <WhatsappLogo size={18} weight="bold" aria-hidden="true" />
-                  <span>Tunai (Chat WA)</span>
-                </button>
-              </div>
+            {settings?.poster_url ? (
+              <section className="glass-elevated rounded-2xl overflow-hidden">
+                <div className="bg-white">
+                  <Image
+                    src={settings.poster_url}
+                    alt={`Poster promo ${storefront.businessName}`}
+                    width={1200}
+                    height={1500}
+                    className="w-full h-auto max-h-[540px] object-contain mx-auto"
+                  />
+                </div>
+                {settings.poster_caption ? (
+                  <p className="px-4 py-3 text-xs sm:text-sm font-medium text-[#1C1917] border-t border-[#1C1917]/10">
+                    {settings.poster_caption}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
 
-              {payTab === "qris" ? (
-                <div className="space-y-4">
-                  <div className="rounded-xl bg-white border border-[#1C1917]/15 p-4 text-center space-y-3">
-                    <div>
-                      <p className="text-xs font-semibold text-[#44403C]">
-                        Silakan scan atau simpan QRIS untuk total:
-                      </p>
-                      <p className="text-2xl font-extrabold text-[#14532D] tabular-nums">
-                        {formatRupiah(totalAmount)}
-                      </p>
+            {settings && !settings.is_open ? (
+              <section className="glass-elevated rounded-2xl p-6 text-center space-y-3">
+                <div className="mx-auto w-12 h-12 rounded-2xl bg-[#FEF3C7] text-[#92400E] flex items-center justify-center">
+                  <Storefront size={26} weight="duotone" aria-hidden="true" />
+                </div>
+                <h1 className="text-lg font-extrabold text-[#1C1917]">
+                  Pemesanan Online Tutup Sementara
+                </h1>
+                <p className="text-sm text-[#44403C] max-w-md mx-auto leading-relaxed">
+                  {settings.closed_message ||
+                    "Maaf, pemesanan online sedang tutup sementara."}
+                </p>
+                {storeWaNumber ? (
+                  <div className="pt-1">
+                    <a
+                      href={`https://wa.me/${storeWaNumber}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="min-h-11 inline-flex items-center justify-center gap-2 rounded-xl bg-[#14532D] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#166534]"
+                    >
+                      <WhatsappLogo size={18} weight="bold" aria-hidden="true" />
+                      Hubungi Toko via WhatsApp
+                    </a>
+                  </div>
+                ) : null}
+              </section>
+            ) : (
+              <form onSubmit={handleSubmitQrisOrder} className="space-y-5">
+                {/* Flagship Single Product Card */}
+                <section className="glass-elevated rounded-2xl overflow-hidden">
+                  <div className="grid grid-cols-1 sm:grid-cols-12">
+                    <div className="sm:col-span-5 relative aspect-[4/3] sm:aspect-auto sm:min-h-[220px] bg-white">
+                      {product.image_url ? (
+                        <Image
+                          src={product.image_url}
+                          alt={product.name}
+                          fill
+                          priority
+                          sizes="(max-width: 640px) 100vw, 280px"
+                          className="object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-2xl font-extrabold text-[#14532D]">
+                          LU
+                        </div>
+                      )}
                     </div>
 
-                    {storefront.qrisImageUrl ? (
-                      <div className="space-y-2.5">
-                        <div className="mx-auto w-56 h-56 relative">
-                          <Image
-                            src={storefront.qrisImageUrl}
-                            alt={`QRIS ${storefront.businessName}`}
-                            fill
-                            sizes="224px"
-                            className="object-contain rounded-xl"
-                          />
+                    <div className="sm:col-span-7 p-5 flex flex-col justify-between gap-4">
+                      <div className="space-y-1.5">
+                        <span className="inline-block rounded-full bg-[#14532D]/10 px-2.5 py-0.5 text-xs font-bold text-[#14532D]">
+                          {product.category}
+                        </span>
+                        <h1 className="text-lg sm:text-xl font-extrabold text-[#1C1917] leading-snug">
+                          {product.name}
+                        </h1>
+                        {product.description ? (
+                          <p className="text-xs sm:text-sm text-[#44403C] leading-relaxed">
+                            {product.description}
+                          </p>
+                        ) : null}
+                        <p className="text-2xl font-extrabold text-[#14532D] tabular-nums">
+                          {formatRupiah(product.price)}
+                          <span className="text-xs font-medium text-[#44403C]"> / paket</span>
+                        </p>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3 pt-2 border-t border-[#1C1917]/10">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-[#44403C]">Jumlah:</span>
+                          <div className="inline-flex items-center gap-1.5 rounded-xl bg-black/5 p-1">
+                            <button
+                              type="button"
+                              onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                              aria-label="Kurangi jumlah"
+                              className="w-9 h-9 rounded-lg bg-white border border-[#1C1917]/15 inline-flex items-center justify-center text-[#1C1917] cursor-pointer"
+                            >
+                              <Minus size={16} weight="bold" aria-hidden="true" />
+                            </button>
+                            <span className="w-8 text-center text-sm font-extrabold text-[#1C1917] tabular-nums">
+                              {quantity}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setQuantity((q) => Math.min(100, q + 1))}
+                              aria-label="Tambah jumlah"
+                              className="w-9 h-9 rounded-lg bg-[#14532D] text-white inline-flex items-center justify-center cursor-pointer"
+                            >
+                              <Plus size={16} weight="bold" aria-hidden="true" />
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex flex-wrap items-center justify-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setQrisFullscreen(true)}
-                            className="min-h-10 inline-flex items-center gap-1.5 rounded-xl border border-[#14532D]/30 bg-[#14532D]/10 px-3 py-1.5 text-xs font-bold text-[#14532D] hover:bg-[#14532D]/15 cursor-pointer"
-                          >
-                            <ArrowsOutSimple size={15} weight="bold" aria-hidden="true" />
-                            Perbesar QRIS
-                          </button>
-                          <a
-                            href={storefront.qrisImageUrl}
-                            download={`QRIS-${storefront.businessName}.jpg`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="min-h-10 inline-flex items-center gap-1.5 rounded-xl border border-[#1C1917]/20 bg-white px-3 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-black/5"
-                          >
-                            <DownloadSimple size={15} weight="bold" aria-hidden="true" />
-                            Simpan Gambar QRIS
-                          </a>
+
+                        <div className="text-right">
+                          <span className="block text-[11px] text-[#44403C]">Total Bayar</span>
+                          <span className="text-lg font-extrabold text-[#B43D0A] tabular-nums">
+                            {formatRupiah(totalAmount)}
+                          </span>
                         </div>
                       </div>
-                    ) : (
-                      <p className="text-xs text-[#B43D0A] bg-[#FEF3C7] rounded-xl p-3">
-                        Gambar QRIS toko belum diunggah oleh admin.
-                      </p>
-                    )}
+                    </div>
+                  </div>
+                </section>
 
-                    <p className="text-xs text-[#44403C] leading-relaxed">
-                      Setelah berhasil transfer via QRIS, tekan tombol konfirmasi di bawah agar admin memvalidasi pembayaran dan menyiapkan pesanan Anda.
+                {/* Buyer Info Card */}
+                <section className="glass-panel rounded-2xl p-5 space-y-4">
+                  <h2 className="text-base font-bold text-[#1C1917]">Data Pemesan</h2>
+
+                  {errorMsg ? (
+                    <div
+                      role="alert"
+                      className="rounded-xl border border-[#B91C1C]/30 bg-red-50 px-3.5 py-2.5 text-xs text-[#B91C1C] flex items-center gap-2"
+                    >
+                      <WarningCircle size={16} weight="bold" aria-hidden="true" />
+                      <span>{errorMsg}</span>
+                    </div>
+                  ) : null}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label htmlFor="buyerName" className="block text-xs font-semibold text-[#1C1917]">
+                        Nama Lengkap
+                      </label>
+                      <input
+                        id="buyerName"
+                        type="text"
+                        required
+                        value={customerName}
+                        onChange={(e) => setCustomerName(e.target.value)}
+                        placeholder="Contoh: Budi"
+                        className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917]"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label htmlFor="buyerPhone" className="block text-xs font-semibold text-[#1C1917]">
+                        No. HP / WhatsApp
+                      </label>
+                      <input
+                        id="buyerPhone"
+                        type="tel"
+                        required
+                        value={customerPhone}
+                        onChange={(e) => setCustomerPhone(e.target.value)}
+                        placeholder="0812xxxxxxxx"
+                        className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917] tabular-nums"
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                {/* Payment Method Section */}
+                <section className="glass-panel rounded-2xl p-5 space-y-4">
+                  <div className="space-y-1">
+                    <h2 className="text-base font-bold text-[#1C1917]">Metode Pembayaran</h2>
+                    <p className="text-xs text-[#44403C]">
+                      Pemesanan langsung lewat web menggunakan QRIS. Untuk pembayaran tunai dapat memesan langsung lewat chat WhatsApp.
                     </p>
                   </div>
 
-                  <button
-                    type="submit"
-                    disabled={submitting || !storefront.qrisImageUrl}
-                    className="min-h-12 w-full rounded-xl bg-[#14532D] px-4 py-3 text-sm sm:text-base font-extrabold text-white hover:bg-[#166534] disabled:opacity-60 transition-colors cursor-pointer"
-                  >
-                    {submitting
-                      ? "Mengirim pesanan..."
-                      : `Konfirmasi Sudah Bayar (${formatRupiah(totalAmount)})`}
-                  </button>
-                </div>
-              ) : (
-                <div className="rounded-xl bg-white border border-[#1C1917]/15 p-4 space-y-3">
-                  <p className="text-sm font-bold text-[#1C1917]">
-                    Pemesanan Tunai Dilayani via Chat WhatsApp
-                  </p>
-                  <p className="text-xs text-[#44403C] leading-relaxed">
-                    Untuk menjaga ketersediaan stok, pesanan dengan pembayaran tunai tidak diproses lewat form web. Klik tombol di bawah untuk langsung chat admin dengan detail pesanan Anda.
-                  </p>
-                  {storeWaNumber ? (
-                    <a
-                      href={buildCashChatUrl()}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="min-h-12 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#B43D0A] px-4 py-3 text-sm font-extrabold text-white hover:bg-[#9A3412] transition-colors"
-                    >
-                      <WhatsappLogo size={20} weight="bold" aria-hidden="true" />
-                      Pesan Tunai via WhatsApp ({formatRupiah(totalAmount)})
-                    </a>
+                  {settings?.enable_qris !== false && settings?.enable_cash_chat !== false ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPayTab("qris")}
+                        className={`min-h-11 rounded-xl border px-3 py-2 inline-flex items-center justify-center gap-2 text-xs sm:text-sm font-bold transition-colors cursor-pointer ${
+                          payTab === "qris"
+                            ? "border-[#14532D] bg-[#14532D] text-white"
+                            : "border-[#1C1917]/20 bg-white text-[#1C1917]"
+                        }`}
+                      >
+                        <QrCode size={18} weight="bold" aria-hidden="true" />
+                        <span>Bayar QRIS</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPayTab("cash_chat")}
+                        className={`min-h-11 rounded-xl border px-3 py-2 inline-flex items-center justify-center gap-2 text-xs sm:text-sm font-bold transition-colors cursor-pointer ${
+                          payTab === "cash_chat"
+                            ? "border-[#B43D0A] bg-[#B43D0A] text-white"
+                            : "border-[#1C1917]/20 bg-white text-[#1C1917]"
+                        }`}
+                      >
+                        <WhatsappLogo size={18} weight="bold" aria-hidden="true" />
+                        <span>Tunai (Chat WA)</span>
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {payTab === "qris" && settings?.enable_qris !== false ? (
+                    <div className="space-y-4">
+                      <div className="rounded-xl bg-white border border-[#1C1917]/15 p-4 text-center space-y-3">
+                        <div>
+                          <p className="text-xs font-semibold text-[#44403C]">
+                            Silakan scan atau simpan QRIS untuk total:
+                          </p>
+                          <p className="text-2xl font-extrabold text-[#14532D] tabular-nums">
+                            {formatRupiah(totalAmount)}
+                          </p>
+                        </div>
+
+                        {storefront.qrisImageUrl ? (
+                          <div className="space-y-2.5">
+                            <div className="mx-auto w-56 h-56 relative">
+                              <Image
+                                src={storefront.qrisImageUrl}
+                                alt={`QRIS ${storefront.businessName}`}
+                                fill
+                                sizes="224px"
+                                className="object-contain rounded-xl"
+                              />
+                            </div>
+                            <div className="flex flex-wrap items-center justify-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setQrisFullscreen(true)}
+                                className="min-h-10 inline-flex items-center gap-1.5 rounded-xl border border-[#14532D]/30 bg-[#14532D]/10 px-3 py-1.5 text-xs font-bold text-[#14532D] hover:bg-[#14532D]/15 cursor-pointer"
+                              >
+                                <ArrowsOutSimple size={15} weight="bold" aria-hidden="true" />
+                                Perbesar QRIS
+                              </button>
+                              <a
+                                href={storefront.qrisImageUrl}
+                                download={`QRIS-${storefront.businessName}.jpg`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="min-h-10 inline-flex items-center gap-1.5 rounded-xl border border-[#1C1917]/20 bg-white px-3 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-black/5"
+                              >
+                                <DownloadSimple size={15} weight="bold" aria-hidden="true" />
+                                Simpan Gambar QRIS
+                              </a>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-[#B43D0A] bg-[#FEF3C7] rounded-xl p-3">
+                            Gambar QRIS toko belum diunggah oleh penjual.
+                          </p>
+                        )}
+
+                        <p className="text-xs text-[#44403C] leading-relaxed">
+                          {settings?.qris_instruction ||
+                            "Setelah berhasil transfer via QRIS, tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda."}
+                        </p>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={submitting || !storefront.qrisImageUrl}
+                        className="min-h-12 w-full rounded-xl bg-[#14532D] px-4 py-3 text-sm sm:text-base font-extrabold text-white hover:bg-[#166534] disabled:opacity-60 transition-colors cursor-pointer"
+                      >
+                        {submitting
+                          ? "Mengirim pesanan..."
+                          : `Konfirmasi Sudah Bayar (${formatRupiah(totalAmount)})`}
+                      </button>
+                    </div>
+                  ) : settings?.enable_cash_chat !== false ? (
+                    <div className="rounded-xl bg-white border border-[#1C1917]/15 p-4 space-y-3">
+                      <p className="text-sm font-bold text-[#1C1917]">
+                        Pemesanan Tunai Dilayani via Chat WhatsApp
+                      </p>
+                      <p className="text-xs text-[#44403C] leading-relaxed">
+                        {settings?.cash_instruction ||
+                          "Untuk menjaga ketersediaan stok, pesanan dengan pembayaran tunai tidak diproses lewat form web. Klik tombol di bawah untuk langsung chat penjual dengan detail pesanan Anda."}
+                      </p>
+                      {storeWaNumber ? (
+                        <a
+                          href={buildCashChatUrl()}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="min-h-12 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#B43D0A] px-4 py-3 text-sm font-extrabold text-white hover:bg-[#9A3412] transition-colors"
+                        >
+                          <WhatsappLogo size={20} weight="bold" aria-hidden="true" />
+                          Pesan Tunai via WhatsApp ({formatRupiah(totalAmount)})
+                        </a>
+                      ) : (
+                        <p className="text-xs text-[#B43D0A]">
+                          Nomor WhatsApp toko belum diatur oleh penjual.
+                        </p>
+                      )}
+                    </div>
                   ) : (
                     <p className="text-xs text-[#B43D0A]">
-                      Nomor WhatsApp toko belum diatur oleh admin.
+                      Metode pembayaran belum diaktifkan oleh penjual.
                     </p>
                   )}
-                </div>
-              )}
-            </section>
-          </form>
+                </section>
+              </form>
+            )}
+          </div>
         )}
       </main>
 

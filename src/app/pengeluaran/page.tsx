@@ -32,6 +32,7 @@ export default async function ExpensesPage() {
       role={session.profile.role}
       businessName={session.profile.business_name}
       userName={session.profile.full_name || session.profile.owner_name}
+      logoUrl={session.profile.logo_url}
       pageTitle="Catatan Pengeluaran & Belanja"
     >
       <ExpensesListClient initialExpenses={(data as Expense[] | null) ?? []} />

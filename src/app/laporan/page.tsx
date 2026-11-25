@@ -58,6 +58,7 @@ export default async function ReportsPage() {
       role={session.profile.role}
       businessName={session.profile.business_name}
       userName={session.profile.full_name || session.profile.owner_name}
+      logoUrl={session.profile.logo_url}
       pageTitle="Laporan Keuangan & Ekspor"
     >
       <ReportsClient

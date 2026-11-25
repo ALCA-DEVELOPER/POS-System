@@ -17,7 +17,7 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { createClient } from "@/lib/supabase/client";
-import { broadcastBusinessUpdate } from "@/lib/realtime";
+import { broadcastBusinessUpdate, emitLocalBusinessSync } from "@/lib/realtime";
 import type { Profile, UserRole } from "@/types/database";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState } from "@/components/ui/StatePanel";
@@ -127,11 +127,17 @@ export function BusinessSettingsClient({
       else setQrisUrl(url);
 
       const updateField = kind === "logo" ? { logo_url: url } : { qris_image_url: url };
-      await supabase
+      const { error: updateErr } = await supabase
         .from("profiles")
         .update(updateField)
         .eq("id", initialProfile.business_id);
 
+      if (updateErr) {
+        setFeedback({ type: "err", text: `Gambar terunggah, tetapi gagal menyimpan ke profil: ${updateErr.message}` });
+        return;
+      }
+
+      emitLocalBusinessSync("settings", kind === "logo" ? { logoUrl: url } : undefined);
       void broadcastBusinessUpdate(initialProfile.business_id, "settings");
       router.refresh();
 
@@ -175,6 +181,7 @@ export function BusinessSettingsClient({
         return;
       }
 
+      emitLocalBusinessSync("settings", { businessName: businessName.trim() });
       void broadcastBusinessUpdate(initialProfile.business_id, "settings");
       router.refresh();
       setFeedback({ type: "ok", text: "Profil bisnis & pengaturan pembayaran tersimpan." });
@@ -330,6 +337,7 @@ export function BusinessSettingsClient({
         text: `Akun ${deleteTarget.full_name} berhasil dihapus.`,
       });
       setDeleteTarget(null);
+      emitLocalBusinessSync("settings");
       void broadcastBusinessUpdate(initialProfile.business_id, "settings");
       router.refresh();
     } catch {

@@ -1,7 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowSquareOut,
@@ -9,15 +10,24 @@ import {
   CheckCircle,
   Copy,
   Database,
+  FloppyDisk,
+  ImageSquare,
   Package,
   ShoppingBag,
+  SlidersHorizontal,
   Trash,
+  UploadSimple,
   WhatsappLogo,
   XCircle,
 } from "@phosphor-icons/react";
+import { createClient } from "@/lib/supabase/client";
 import { formatDateId, formatRupiah, normalizeWhatsAppPhone } from "@/lib/format";
 import { broadcastBusinessUpdate } from "@/lib/realtime";
-import type { CustomerOrder } from "@/types/database";
+import type {
+  CustomerOrder,
+  Product,
+  StorefrontSettings,
+} from "@/types/database";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState, ErrorState } from "@/components/ui/StatePanel";
 
@@ -65,33 +75,96 @@ CREATE POLICY customer_orders_team_all ON public.customer_orders
     AND business_id = public.get_my_business_id()
   );
 
+CREATE TABLE IF NOT EXISTS public.storefront_settings (
+  business_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
+  is_open BOOLEAN NOT NULL DEFAULT true,
+  closed_message TEXT NOT NULL DEFAULT 'Maaf, pemesanan online sedang tutup sementara. Silakan hubungi WhatsApp kami.',
+  poster_url TEXT,
+  poster_caption TEXT NOT NULL DEFAULT '',
+  announcement TEXT NOT NULL DEFAULT '',
+  featured_product_id UUID REFERENCES public.products(id) ON DELETE SET NULL,
+  custom_title TEXT NOT NULL DEFAULT '',
+  custom_description TEXT NOT NULL DEFAULT '',
+  custom_price NUMERIC(14,2) CHECK (custom_price IS NULL OR custom_price >= 0),
+  enable_qris BOOLEAN NOT NULL DEFAULT true,
+  enable_cash_chat BOOLEAN NOT NULL DEFAULT true,
+  qris_instruction TEXT NOT NULL DEFAULT 'Setelah berhasil transfer via QRIS, tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda.',
+  cash_instruction TEXT NOT NULL DEFAULT 'Untuk menjaga ketersediaan stok, pesanan dengan pembayaran tunai tidak diproses lewat form web. Klik tombol di bawah untuk langsung chat penjual.',
+  whatsapp_number TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+DROP TRIGGER IF EXISTS trg_storefront_settings_updated_at ON public.storefront_settings;
+CREATE TRIGGER trg_storefront_settings_updated_at
+  BEFORE UPDATE ON public.storefront_settings
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+ALTER TABLE public.storefront_settings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS storefront_settings_team_select ON public.storefront_settings;
+CREATE POLICY storefront_settings_team_select ON public.storefront_settings
+  FOR SELECT USING (
+    public.get_my_role() IN ('owner', 'cashier')
+    AND business_id = public.get_my_business_id()
+  );
+
+DROP POLICY IF EXISTS storefront_settings_owner_write ON public.storefront_settings;
+CREATE POLICY storefront_settings_owner_write ON public.storefront_settings
+  FOR ALL USING (
+    public.get_my_role() = 'owner'
+    AND business_id = public.get_my_business_id()
+  )
+  WITH CHECK (
+    public.get_my_role() = 'owner'
+    AND business_id = public.get_my_business_id()
+  );
+
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime')
-    AND NOT EXISTS (
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    IF NOT EXISTS (
       SELECT 1 FROM pg_publication_tables
       WHERE pubname = 'supabase_realtime'
         AND schemaname = 'public'
         AND tablename = 'customer_orders'
-    )
-  THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE public.customer_orders;
+    ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.customer_orders;
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime'
+        AND schemaname = 'public'
+        AND tablename = 'storefront_settings'
+    ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.storefront_settings;
+    END IF;
   END IF;
 END;
 $$;`;
 
 interface CustomerOrdersClientProps {
   tableMissing: boolean;
+  isOwner: boolean;
+  businessId: string;
   businessName: string;
   initialOrders: CustomerOrder[];
+  initialSettings: StorefrontSettings;
+  products: Product[];
 }
 
 export function CustomerOrdersClient({
   tableMissing,
+  isOwner,
+  businessId,
   businessName,
   initialOrders,
+  initialSettings,
+  products,
 }: CustomerOrdersClientProps) {
   const router = useRouter();
+  const [activeSection, setActiveSection] = useState<"orders" | "storefront">("orders");
   const [orders, setOrders] = useState<CustomerOrder[]>(initialOrders);
   const [filter, setFilter] = useState<"active" | "all" | "done">("active");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -102,9 +175,159 @@ export function CustomerOrdersClient({
   const [deleteTarget, setDeleteTarget] = useState<CustomerOrder | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Storefront Settings Form State (Owner)
+  const [isOpen, setIsOpen] = useState(initialSettings.is_open);
+  const [closedMessage, setClosedMessage] = useState(initialSettings.closed_message);
+  const [posterUrl, setPosterUrl] = useState<string | null>(initialSettings.poster_url);
+  const [posterCaption, setPosterCaption] = useState(initialSettings.poster_caption);
+  const [announcement, setAnnouncement] = useState(initialSettings.announcement);
+  const [featuredProductId, setFeaturedProductId] = useState(
+    initialSettings.featured_product_id ?? ""
+  );
+  const [customTitle, setCustomTitle] = useState(initialSettings.custom_title);
+  const [customDescription, setCustomDescription] = useState(
+    initialSettings.custom_description
+  );
+  const [customPriceInput, setCustomPriceInput] = useState(
+    initialSettings.custom_price !== null && initialSettings.custom_price !== undefined
+      ? String(initialSettings.custom_price)
+      : ""
+  );
+  const [enableQris, setEnableQris] = useState(initialSettings.enable_qris);
+  const [enableCashChat, setEnableCashChat] = useState(initialSettings.enable_cash_chat);
+  const [qrisInstruction, setQrisInstruction] = useState(
+    initialSettings.qris_instruction
+  );
+  const [cashInstruction, setCashInstruction] = useState(
+    initialSettings.cash_instruction
+  );
+  const [whatsappNumber, setWhatsappNumber] = useState(initialSettings.whatsapp_number);
+  const [uploadingPoster, setUploadingPoster] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+
   useEffect(() => {
     setOrders(initialOrders);
   }, [initialOrders]);
+
+  useEffect(() => {
+    setIsOpen(initialSettings.is_open);
+    setClosedMessage(initialSettings.closed_message);
+    setPosterUrl(initialSettings.poster_url);
+    setPosterCaption(initialSettings.poster_caption);
+    setAnnouncement(initialSettings.announcement);
+    setFeaturedProductId(initialSettings.featured_product_id ?? "");
+    setCustomTitle(initialSettings.custom_title);
+    setCustomDescription(initialSettings.custom_description);
+    setCustomPriceInput(
+      initialSettings.custom_price !== null && initialSettings.custom_price !== undefined
+        ? String(initialSettings.custom_price)
+        : ""
+    );
+    setEnableQris(initialSettings.enable_qris);
+    setEnableCashChat(initialSettings.enable_cash_chat);
+    setQrisInstruction(initialSettings.qris_instruction);
+    setCashInstruction(initialSettings.cash_instruction);
+    setWhatsappNumber(initialSettings.whatsapp_number);
+  }, [initialSettings]);
+
+  const persistStorefront = async (overridePosterUrl?: string | null) => {
+    const resolvedPoster = overridePosterUrl !== undefined ? overridePosterUrl : posterUrl;
+    const trimmedPrice = customPriceInput.trim();
+    const parsedPrice = trimmedPrice === "" ? null : Math.max(0, Number(trimmedPrice) || 0);
+
+    const res = await fetch("/api/storefront", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        is_open: isOpen,
+        closed_message: closedMessage.trim(),
+        poster_url: resolvedPoster,
+        poster_caption: posterCaption.trim(),
+        announcement: announcement.trim(),
+        featured_product_id: featuredProductId || null,
+        custom_title: customTitle.trim(),
+        custom_description: customDescription.trim(),
+        custom_price: parsedPrice,
+        enable_qris: enableQris,
+        enable_cash_chat: enableCashChat,
+        qris_instruction: qrisInstruction.trim(),
+        cash_instruction: cashInstruction.trim(),
+        whatsapp_number: whatsappNumber.trim(),
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json?.error ?? "Gagal menyimpan pengaturan halaman pembeli.");
+    }
+    return json.settings as StorefrontSettings;
+  };
+
+  const handlePosterUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingPoster(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const supabase = createClient();
+      const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+      const filePath = `${businessId}/poster-${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage
+        .from("store-assets")
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadErr) {
+        throw new Error(`Gagal mengunggah poster: ${uploadErr.message}`);
+      }
+
+      const { data: pub } = supabase.storage.from("store-assets").getPublicUrl(filePath);
+      const url = pub.publicUrl;
+      setPosterUrl(url);
+      await persistStorefront(url);
+      setSuccessMsg("Poster berhasil dipasang dan langsung tampil di halaman pembeli (/pesan).");
+      router.refresh();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Gagal mengunggah poster.");
+    } finally {
+      setUploadingPoster(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleRemovePoster = async () => {
+    setUploadingPoster(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      setPosterUrl(null);
+      await persistStorefront(null);
+      setSuccessMsg("Poster dihapus dari halaman pembeli.");
+      router.refresh();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Gagal menghapus poster.");
+    } finally {
+      setUploadingPoster(false);
+    }
+  };
+
+  const handleSaveStorefrontSettings = async (e: FormEvent) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      await persistStorefront();
+      setSuccessMsg("Pengaturan halaman pembeli berhasil disimpan dan langsung live!");
+      router.refresh();
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : "Gagal menyimpan pengaturan halaman pembeli."
+      );
+    } finally {
+      setSavingSettings(false);
+    }
+  };
 
   const counts = useMemo(() => {
     let unpaid = 0;
@@ -334,7 +557,348 @@ export function CustomerOrdersClient({
         </div>
       </section>
 
-      {/* Filter Tabs */}
+      {isOwner ? (
+        <div className="flex flex-wrap gap-2 border-b border-[#1C1917]/10 pb-3">
+          <button
+            type="button"
+            onClick={() => setActiveSection("orders")}
+            className={`min-h-11 inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs sm:text-sm font-bold transition-colors cursor-pointer ${
+              activeSection === "orders"
+                ? "bg-[#14532D] text-white"
+                : "glass-panel text-[#1C1917] hover:bg-white"
+            }`}
+          >
+            <ShoppingBag size={17} weight="bold" aria-hidden="true" />
+            <span>Pesanan Masuk ({orders.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSection("storefront")}
+            className={`min-h-11 inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs sm:text-sm font-bold transition-colors cursor-pointer ${
+              activeSection === "storefront"
+                ? "bg-[#B43D0A] text-white"
+                : "glass-panel text-[#1C1917] hover:bg-white"
+            }`}
+          >
+            <SlidersHorizontal size={17} weight="bold" aria-hidden="true" />
+            <span>Atur Halaman Pembeli & Poster</span>
+          </button>
+        </div>
+      ) : null}
+
+      {activeSection === "storefront" && isOwner ? (
+        <form onSubmit={handleSaveStorefrontSettings} className="space-y-5 max-w-4xl">
+          {/* Status Toko & Pengumuman */}
+          <section className="glass-panel rounded-2xl p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-[#1C1917]">
+                  Status Buka / Tutup Pemesanan Online
+                </h2>
+                <p className="text-xs text-[#44403C]">
+                  Matikan sementara jika stok habis atau toko sedang libur agar pembeli tidak bisa checkout QRIS.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-black/5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(true)}
+                  className={`min-h-10 rounded-lg px-3.5 text-xs font-bold cursor-pointer ${
+                    isOpen ? "bg-[#14532D] text-white" : "text-[#44403C]"
+                  }`}
+                >
+                  Sedang Buka
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className={`min-h-10 rounded-lg px-3.5 text-xs font-bold cursor-pointer ${
+                    !isOpen ? "bg-[#B91C1C] text-white" : "text-[#44403C]"
+                  }`}
+                >
+                  Tutup Sementara
+                </button>
+              </div>
+            </div>
+
+            {!isOpen ? (
+              <div className="space-y-1.5">
+                <label htmlFor="sfClosedMsg" className="block text-xs font-semibold text-[#1C1917]">
+                  Pesan Saat Toko Tutup
+                </label>
+                <input
+                  id="sfClosedMsg"
+                  type="text"
+                  value={closedMessage}
+                  onChange={(e) => setClosedMessage(e.target.value)}
+                  className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917]"
+                />
+              </div>
+            ) : null}
+
+            <div className="space-y-1.5">
+              <label htmlFor="sfAnnouncement" className="block text-xs font-semibold text-[#1C1917]">
+                Teks Pengumuman Atas (Opsional)
+              </label>
+              <input
+                id="sfAnnouncement"
+                type="text"
+                value={announcement}
+                onChange={(e) => setAnnouncement(e.target.value)}
+                placeholder="Contoh: Ready setiap hari jam 15.00 - 21.00 WIB di Mikost GOR Satria"
+                className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917]"
+              />
+            </div>
+          </section>
+
+          {/* Poster Promo Upload */}
+          <section className="glass-panel rounded-2xl p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <ImageSquare size={20} weight="duotone" className="text-[#B43D0A]" aria-hidden="true" />
+              <div>
+                <h2 className="text-base font-bold text-[#1C1917]">
+                  Poster / Banner Halaman Pembeli
+                </h2>
+                <p className="text-xs text-[#44403C]">
+                  Tempel poster menu atau promo yang langsung tampil utuh di bagian atas halaman `/pesan`.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-start gap-4">
+              {posterUrl ? (
+                <div className="w-full sm:w-56 rounded-2xl border border-[#1C1917]/15 bg-white overflow-hidden shrink-0">
+                  <Image
+                    src={posterUrl}
+                    alt="Pratinjau poster halaman pembeli"
+                    width={480}
+                    height={600}
+                    className="w-full h-auto max-h-64 object-contain"
+                  />
+                </div>
+              ) : (
+                <div className="w-full sm:w-56 h-40 rounded-2xl border border-dashed border-[#1C1917]/20 bg-white/75 flex flex-col items-center justify-center gap-1.5 text-xs text-[#44403C] shrink-0">
+                  <ImageSquare size={28} aria-hidden="true" />
+                  <span>Belum ada poster</span>
+                </div>
+              )}
+
+              <div className="flex-1 w-full space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label
+                    htmlFor="poster-upload"
+                    className="min-h-11 inline-flex items-center gap-2 rounded-xl bg-[#B43D0A] px-4 py-2 text-xs sm:text-sm font-bold text-white hover:bg-[#9A3412] cursor-pointer"
+                  >
+                    <UploadSimple size={16} weight="bold" aria-hidden="true" />
+                    {uploadingPoster
+                      ? "Mengunggah poster..."
+                      : posterUrl
+                        ? "Ganti Poster"
+                        : "Unggah Poster"}
+                  </label>
+                  <input
+                    id="poster-upload"
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    onChange={handlePosterUpload}
+                  />
+
+                  {posterUrl ? (
+                    <button
+                      type="button"
+                      disabled={uploadingPoster}
+                      onClick={() => {
+                        void handleRemovePoster();
+                      }}
+                      className="min-h-11 inline-flex items-center gap-1.5 rounded-xl border border-[#B91C1C]/30 bg-white px-3.5 py-2 text-xs font-bold text-[#B91C1C] hover:bg-red-50 cursor-pointer"
+                    >
+                      <Trash size={15} weight="bold" aria-hidden="true" />
+                      Hapus Poster
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="sfPosterCaption" className="block text-xs font-semibold text-[#1C1917]">
+                    Keterangan Singkat di Bawah Poster (Opsional)
+                  </label>
+                  <input
+                    id="sfPosterCaption"
+                    type="text"
+                    value={posterCaption}
+                    onChange={(e) => setPosterCaption(e.target.value)}
+                    placeholder="Contoh: Promo paket hemat coklat & keju lumer!"
+                    className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917]"
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Menu, Title, Price & Description */}
+          <section className="glass-panel rounded-2xl p-5 space-y-4">
+            <h2 className="text-base font-bold text-[#1C1917]">
+              Menu, Harga & Deskripsi Halaman Pembeli
+            </h2>
+
+            <div className="space-y-1.5">
+              <label htmlFor="sfProduct" className="block text-xs font-semibold text-[#1C1917]">
+                Pilih Menu yang Ditampilkan
+              </label>
+              <select
+                id="sfProduct"
+                value={featuredProductId}
+                onChange={(e) => setFeaturedProductId(e.target.value)}
+                className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3 text-sm text-[#1C1917]"
+              >
+                <option value="">Otomatis (Paket Lumpia Ubi Ungu / Menu Pertama)</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} - {formatRupiah(p.price)}
+                    {!p.is_active ? " (Nonaktif)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label htmlFor="sfCustomTitle" className="block text-xs font-semibold text-[#1C1917]">
+                  Judul Tampilan Menu (Opsional)
+                </label>
+                <input
+                  id="sfCustomTitle"
+                  type="text"
+                  value={customTitle}
+                  onChange={(e) => setCustomTitle(e.target.value)}
+                  placeholder="Kosongkan untuk pakai nama menu asli"
+                  className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917]"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="sfCustomPrice" className="block text-xs font-semibold text-[#1C1917]">
+                  Harga Khusus Halaman Pembeli (Opsional, Rp)
+                </label>
+                <input
+                  id="sfCustomPrice"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={customPriceInput}
+                  onChange={(e) => setCustomPriceInput(e.target.value)}
+                  placeholder="Kosongkan untuk ikut harga menu normal"
+                  className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917] tabular-nums"
+                />
+                {customPriceInput.trim() !== "" ? (
+                  <p className="text-[11px] font-semibold text-[#14532D] tabular-nums">
+                    Harga tampil: {formatRupiah(Number(customPriceInput) || 0)}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="sfDesc" className="block text-xs font-semibold text-[#1C1917]">
+                Deskripsi Menu / Info Isi Paket
+              </label>
+              <textarea
+                id="sfDesc"
+                rows={2}
+                value={customDescription}
+                onChange={(e) => setCustomDescription(e.target.value)}
+                placeholder="Contoh: Lumpia ubi ungu hangat dengan isian coklat lumer dan keju melimpah."
+                className="w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 py-2.5 text-sm text-[#1C1917]"
+              />
+            </div>
+          </section>
+
+          {/* Payment Options & Instructions */}
+          <section className="glass-panel rounded-2xl p-5 space-y-4">
+            <h2 className="text-base font-bold text-[#1C1917]">
+              Metode Pembayaran & WhatsApp Tujuan
+            </h2>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="min-h-11 rounded-xl border border-[#1C1917]/15 bg-white px-3.5 py-2.5 flex items-center gap-2.5 text-sm font-semibold text-[#1C1917] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={enableQris}
+                  onChange={(e) => setEnableQris(e.target.checked)}
+                  className="w-4 h-4 accent-[#14532D]"
+                />
+                <span>Aktifkan Bayar QRIS (Pesan di Web)</span>
+              </label>
+
+              <label className="min-h-11 rounded-xl border border-[#1C1917]/15 bg-white px-3.5 py-2.5 flex items-center gap-2.5 text-sm font-semibold text-[#1C1917] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={enableCashChat}
+                  onChange={(e) => setEnableCashChat(e.target.checked)}
+                  className="w-4 h-4 accent-[#B43D0A]"
+                />
+                <span>Aktifkan Pesan Tunai via Chat WA</span>
+              </label>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="sfQrisInstr" className="block text-xs font-semibold text-[#1C1917]">
+                Teks Petunjuk Bayar QRIS
+              </label>
+              <textarea
+                id="sfQrisInstr"
+                rows={2}
+                value={qrisInstruction}
+                onChange={(e) => setQrisInstruction(e.target.value)}
+                className="w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 py-2.5 text-sm text-[#1C1917]"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="sfCashInstr" className="block text-xs font-semibold text-[#1C1917]">
+                Teks Petunjuk Bayar Tunai (Chat WA)
+              </label>
+              <textarea
+                id="sfCashInstr"
+                rows={2}
+                value={cashInstruction}
+                onChange={(e) => setCashInstruction(e.target.value)}
+                className="w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 py-2.5 text-sm text-[#1C1917]"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="sfWaNum" className="block text-xs font-semibold text-[#1C1917]">
+                No. WhatsApp Tujuan Order Pembeli (Opsional)
+              </label>
+              <input
+                id="sfWaNum"
+                type="tel"
+                value={whatsappNumber}
+                onChange={(e) => setWhatsappNumber(e.target.value)}
+                placeholder="Kosongkan untuk otomatis pakai nomor toko di Pengaturan Bisnis"
+                className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917] tabular-nums"
+              />
+            </div>
+
+            <div className="pt-1">
+              <button
+                type="submit"
+                disabled={savingSettings}
+                className="min-h-12 inline-flex items-center gap-2 rounded-xl bg-[#14532D] px-6 py-3 text-sm font-extrabold text-white hover:bg-[#166534] disabled:opacity-60 cursor-pointer"
+              >
+                <FloppyDisk size={18} weight="bold" aria-hidden="true" />
+                {savingSettings
+                  ? "Menyimpan..."
+                  : "Simpan Pengaturan Halaman Pembeli"}
+              </button>
+            </div>
+          </section>
+        </form>
+      ) : (
+        <>
+          {/* Filter Tabs */}
       <div className="flex flex-wrap gap-2">
         {(
           [
@@ -534,6 +1098,8 @@ export function CustomerOrdersClient({
             );
           })}
         </div>
+      )}
+        </>
       )}
 
       {/* Delete Confirm Modal */}

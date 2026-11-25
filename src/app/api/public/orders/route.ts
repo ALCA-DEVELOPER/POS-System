@@ -41,6 +41,24 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!storefront.settings.is_open) {
+      return NextResponse.json(
+        {
+          error:
+            storefront.settings.closed_message ||
+            "Maaf, pemesanan online sedang tutup sementara.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!storefront.settings.enable_qris) {
+      return NextResponse.json(
+        { error: "Pemesanan QRIS via web sedang dinonaktifkan admin." },
+        { status: 400 }
+      );
+    }
+
     const { customer_name, customer_phone, quantity, notes } = parsed.data;
     const unitPrice = Number(storefront.product.price);
     const totalAmount = unitPrice * quantity;

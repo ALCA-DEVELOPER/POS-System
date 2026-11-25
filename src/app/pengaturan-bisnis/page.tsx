@@ -59,6 +59,7 @@ export default async function BusinessSettingsPage() {
       role={session.profile.role}
       businessName={sharedProfile.business_name}
       userName={session.profile.full_name || session.profile.owner_name}
+      logoUrl={sharedProfile.logo_url}
       pageTitle="Pengaturan Bisnis & Staf"
     >
       <BusinessSettingsClient

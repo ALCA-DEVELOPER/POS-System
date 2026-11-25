@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { Profile, UserRole } from "@/types/database";
 
 /** Default landing route per role. */
@@ -60,7 +61,36 @@ export async function requireSession(allowedRoles?: UserRole[]): Promise<Session
     redirect("/login?error=akun_nonaktif");
   }
 
-  const role = (profile?.role as UserRole | undefined) ?? "owner";
+  let resolvedProfile = (profile as Profile | null) ?? null;
+
+  // Gabungkan identitas & branding usaha induk agar co-owner, kasir, dan staf dapur selalu melihat logo & info toko terbaru.
+  if (
+    resolvedProfile &&
+    resolvedProfile.business_id &&
+    resolvedProfile.business_id !== resolvedProfile.id
+  ) {
+    try {
+      const admin = createAdminClient();
+      const { data: businessProfile } = await admin
+        .from("profiles")
+        .select(
+          "business_name, owner_name, phone, address, logo_url, qris_image_url, bank_name, bank_account_number, bank_account_holder, tax_rate, service_charge_rate"
+        )
+        .eq("id", resolvedProfile.business_id)
+        .maybeSingle();
+
+      if (businessProfile) {
+        resolvedProfile = {
+          ...resolvedProfile,
+          ...businessProfile,
+        };
+      }
+    } catch {
+      // Tetap gunakan profil akun saat env admin belum tersedia
+    }
+  }
+
+  const role = resolvedProfile?.role ?? "owner";
   if (allowedRoles && !allowedRoles.includes(role)) {
     redirect(getDefaultRouteForRole(role));
   }
@@ -68,7 +98,7 @@ export async function requireSession(allowedRoles?: UserRole[]): Promise<Session
   return {
     userId: user.id,
     email: user.email ?? "",
-    profile: (profile as Profile | null) ?? null,
+    profile: resolvedProfile,
     schemaMissing: false,
   };
 }

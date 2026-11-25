@@ -255,9 +255,28 @@ export interface CustomerOrder {
 export interface PublicStorefrontProduct {
   id: string;
   name: string;
+  description: string;
   price: number;
   category: ProductCategory;
   image_url: string | null;
+}
+
+export interface StorefrontSettings {
+  business_id: string;
+  is_open: boolean;
+  closed_message: string;
+  poster_url: string | null;
+  poster_caption: string;
+  announcement: string;
+  featured_product_id: string | null;
+  custom_title: string;
+  custom_description: string;
+  custom_price: number | null;
+  enable_qris: boolean;
+  enable_cash_chat: boolean;
+  qris_instruction: string;
+  cash_instruction: string;
+  whatsapp_number: string;
 }
 
 export interface PublicStorefrontData {
@@ -268,5 +287,7 @@ export interface PublicStorefrontData {
   logoUrl: string | null;
   qrisImageUrl: string | null;
   product: PublicStorefrontProduct | null;
+  settings: StorefrontSettings;
   ordersTableMissing?: boolean;
+  settingsTableMissing?: boolean;
 }

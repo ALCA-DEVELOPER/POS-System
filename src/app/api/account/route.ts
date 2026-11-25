@@ -75,6 +75,7 @@ export async function DELETE(request: Request) {
 
       // 2. Bersihkan tabel anak ke induk secara berurutan agar bebas constraint ON DELETE RESTRICT
       await admin.from("customer_orders").delete().eq("business_id", businessId);
+      await admin.from("storefront_settings").delete().eq("business_id", businessId);
       await admin.from("capital_entries").delete().eq("user_id", businessId);
       await admin.from("stock_movements").delete().eq("user_id", businessId);
       await admin.from("expenses").delete().eq("user_id", businessId);

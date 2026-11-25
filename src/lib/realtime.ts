@@ -22,11 +22,14 @@ export function getPublicOrderChannelName(orderId: string): string {
   return `kulinerkas-pub-order-${orderId}`;
 }
 
-export function emitLocalBusinessSync(scope: BusinessSyncScope = "all") {
+export function emitLocalBusinessSync(
+  scope: BusinessSyncScope = "all",
+  meta?: { logoUrl?: string | null; businessName?: string }
+) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(
     new CustomEvent(BUSINESS_SYNC_DOM_EVENT, {
-      detail: { scope, at: Date.now() },
+      detail: { scope, at: Date.now(), ...meta },
     })
   );
 }
