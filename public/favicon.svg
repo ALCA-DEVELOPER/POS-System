@@ -1,13 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#166534"/>
-      <stop offset="100%" stop-color="#0F3F22"/>
-    </linearGradient>
-  </defs>
-  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <rect x="24" y="24" width="464" height="464" rx="92" fill="none" stroke="rgba(250,248,245,0.22)" stroke-width="6"/>
-  <path d="M116 144 H396 V344 L366 322 L336 344 L306 322 L276 344 L246 322 L216 344 L186 322 L156 344 L116 318 Z" fill="rgba(250,248,245,0.12)" stroke="rgba(250,248,245,0.35)" stroke-width="4"/>
-  <text x="256" y="278" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="158" font-weight="800" letter-spacing="-6" fill="#FAF8F5">KK</text>
-  <rect x="156" y="368" width="200" height="18" rx="9" fill="#EA580C"/>
+  <rect width="512" height="512" rx="112" fill="#F2EFE0"/>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="rgba(22,58,36,0.16)" stroke-width="6"/>
+  <g fill="none" stroke="#163A24" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="88" y1="352" x2="424" y2="352"/>
+    <path d="M114 352 C114 234 214 196 296 226"/>
+    <path d="M148 326 C158 268 194 238 240 228"/>
+    <path d="M380 282 C392 302 398 326 398 352"/>
+    <circle cx="256" cy="196" r="18"/>
+    <path d="M294 316 C322 276 340 232 340 166"/>
+    <path d="M340 218 C306 204 294 170 306 130 C342 146 356 178 340 218 Z"/>
+    <path d="M332 252 C356 220 392 214 426 224 C408 262 374 274 332 252 Z"/>
+    <path d="M324 164 C332 180 336 196 338 212"/>
+    <path d="M350 248 C368 242 384 238 400 234"/>
+  </g>
+  <circle cx="388" cy="184" r="14" fill="#B44B22"/>
 </svg>

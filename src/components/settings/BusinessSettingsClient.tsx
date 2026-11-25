@@ -21,6 +21,7 @@ import { broadcastBusinessUpdate, emitLocalBusinessSync } from "@/lib/realtime";
 import type { Profile, UserRole } from "@/types/database";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState } from "@/components/ui/StatePanel";
+import { BrandLogo } from "@/components/ui/BrandLogo";
 
 export interface StaffMember {
   id: string;
@@ -397,7 +398,7 @@ export function BusinessSettingsClient({
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <span className="text-lg font-extrabold text-[#14532D]">KK</span>
+                <BrandLogo variant="square" size={80} className="rounded-none border-0" />
               )}
             </div>
             <div className="space-y-1.5">

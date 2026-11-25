@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
 import { CheckCircle, Storefront, WarningCircle } from "@phosphor-icons/react";
 import { createClient } from "@/lib/supabase/client";
+import { BrandLogo } from "@/components/ui/BrandLogo";
 
 function RegisterForm() {
   const router = useRouter();
@@ -98,9 +99,7 @@ function RegisterForm() {
     <main id="main-content" className="min-h-dvh flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-md space-y-5">
         <div className="text-center space-y-2">
-          <div className="mx-auto w-12 h-12 rounded-2xl bg-[#14532D] text-white flex items-center justify-center font-extrabold text-base tracking-tight">
-            KK
-          </div>
+          <BrandLogo variant="full" size={76} priority className="mx-auto shadow-xs" />
           <h1 className="text-2xl font-extrabold text-[#1C1917]">
             Daftarkan Usaha Kuliner
           </h1>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DownloadSimple, ShareNetwork, X } from "@phosphor-icons/react";
+import { BrandLogo } from "@/components/ui/BrandLogo";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -83,9 +84,7 @@ export function InstallPwaBanner() {
       className="fixed bottom-20 md:bottom-5 left-3 right-3 md:left-auto md:right-5 md:w-[380px] z-50 glass-elevated rounded-2xl p-3.5 shadow-lg border border-white/80"
     >
       <div className="flex items-start gap-3">
-        <div className="shrink-0 w-10 h-10 rounded-xl bg-[#14532D] text-white flex items-center justify-center font-bold text-sm tracking-tight">
-          KK
-        </div>
+        <BrandLogo variant="mark" size={40} decorative />
         <div className="min-w-0 flex-1 space-y-1">
           <p className="text-sm font-bold text-[#1C1917] leading-snug">
             Pasang KulinerKas di Layar Utama
