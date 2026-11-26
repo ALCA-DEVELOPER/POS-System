@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   Camera,
   CheckCircle,
@@ -72,34 +72,15 @@ export function ScanReceiptClient({ businessId, ingredients }: ScanReceiptClient
   const [items, setItems] = useState<VerificationItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
+  const lastScanImageRef = useRef<{ base64: string; mimeType: string } | null>(null);
 
   const ingredientMap = new Map(ingredients.map((i) => [i.id, i]));
 
-  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const runOcrScan = async (base64: string, mimeType: string) => {
     setScanError(null);
-    setSavedOk(false);
-    setScanStage("compressing");
+    setScanStage("scanning");
 
     try {
-      const { blob, base64, mimeType } = await compressImageFile(file);
-      const localUrl = URL.createObjectURL(blob);
-      setPreviewUrl(localUrl);
-
-      setScanStage("scanning");
-
-      // Upload receipt image to private Supabase Storage bucket
-      const supabase = createClient();
-      const storagePath = `${businessId}/struk-${Date.now()}.jpg`;
-      const { error: uploadErr } = await supabase.storage
-        .from("receipts")
-        .upload(storagePath, blob, { contentType: mimeType, upsert: false });
-
-      if (!uploadErr) {
-        setReceiptStoragePath(storagePath);
-      }
-
       const res = await fetch("/api/ocr-receipt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -151,7 +132,42 @@ export function ScanReceiptClient({ businessId, ingredients }: ScanReceiptClient
       );
 
       setItems(mapped);
+    } catch (err) {
+      setScanError(
+        err instanceof Error ? err.message : "Gagal memproses foto struk."
+      );
+    } finally {
       setScanStage("ready");
+    }
+  };
+
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setScanError(null);
+    setSavedOk(false);
+    setScanStage("compressing");
+
+    try {
+      const { blob, base64, mimeType } = await compressImageFile(file);
+      const localUrl = URL.createObjectURL(blob);
+      setPreviewUrl(localUrl);
+      lastScanImageRef.current = { base64, mimeType };
+
+      setScanStage("scanning");
+
+      // Upload receipt image to private Supabase Storage bucket
+      const supabase = createClient();
+      const storagePath = `${businessId}/struk-${Date.now()}.jpg`;
+      const { error: uploadErr } = await supabase.storage
+        .from("receipts")
+        .upload(storagePath, blob, { contentType: mimeType, upsert: false });
+
+      if (!uploadErr) {
+        setReceiptStoragePath(storagePath);
+      }
+
+      await runOcrScan(base64, mimeType);
     } catch (err) {
       setScanError(
         err instanceof Error ? err.message : "Gagal memproses foto struk."
@@ -166,6 +182,7 @@ export function ScanReceiptClient({ businessId, ingredients }: ScanReceiptClient
     setScanError(null);
     setSavedOk(false);
     setPreviewUrl(null);
+    lastScanImageRef.current = null;
     setReceiptStoragePath(null);
     setConfidenceNotes("");
     setItems([
@@ -284,7 +301,16 @@ export function ScanReceiptClient({ businessId, ingredients }: ScanReceiptClient
         <ErrorState
           title="Kendala pemindaian struk"
           message={scanError}
-          onRetry={() => setScanError(null)}
+          onRetry={() => {
+            if (lastScanImageRef.current) {
+              void runOcrScan(
+                lastScanImageRef.current.base64,
+                lastScanImageRef.current.mimeType
+              );
+            } else {
+              setScanError(null);
+            }
+          }}
         />
       ) : null}
 

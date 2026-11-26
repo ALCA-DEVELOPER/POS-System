@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { toJakartaDateKey } from "@/lib/analytics";
 import type { Ingredient, IngredientUnit } from "@/types/database";
 
+export const maxDuration = 60;
+
 const receiptSchema = {
   type: Type.OBJECT,
   properties: {
@@ -79,6 +81,28 @@ function suggestConversionFactor(receiptUnitRaw: string, stockUnit: IngredientUn
   return 1;
 }
 
+function normalizeReceiptDate(raw: string | undefined, fallbackDate: string): string {
+  const val = (raw ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+  const dmy = /^(\d{2})[-/](\d{2})[-/](\d{4})$/.exec(val);
+  if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+  return fallbackDate;
+}
+
+function isRetryableModelError(err: unknown): { retryable: boolean; busy: boolean } {
+  const status = (err as { status?: number })?.status;
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  const isBusy =
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    /503|429|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|overloaded|temporarily/i.test(msg);
+  const isNotFound = status === 404 || /404|NOT_FOUND|no longer available/i.test(msg);
+  return { retryable: isBusy || isNotFound, busy: isBusy };
+}
+
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
@@ -136,15 +160,19 @@ export async function POST(request: Request) {
       "4. Jika tanggal tidak terbaca jelas, kosongkan receipt_date.",
     ].join("\n");
 
+    // Prioritaskan model Flash-Lite yang stabil dan cepat saat Flash penuh mengalami lonjakan trafik (503)
     const flashModels = [
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-flash-lite",
       "gemini-3.6-flash",
-      "gemini-3.8-flash",
-      "gemini-3.7-flash",
       "gemini-3.5-flash",
+      "gemini-3.7-flash",
+      "gemini-3.8-flash",
     ];
 
     let response: Awaited<ReturnType<typeof ai.models.generateContent>> | null = null;
     let lastModelError: unknown = null;
+    let sawBusyError = false;
 
     for (const model of flashModels) {
       try {
@@ -168,8 +196,9 @@ export async function POST(request: Request) {
         if (response?.text) break;
       } catch (err) {
         lastModelError = err;
-        const status = (err as { status?: number })?.status;
-        if (status === 404 || status === 429 || status === 503) {
+        const { retryable, busy } = isRetryableModelError(err);
+        if (busy) sawBusyError = true;
+        if (retryable) {
           continue;
         }
         throw err;
@@ -177,9 +206,18 @@ export async function POST(request: Request) {
     }
 
     if (!response) {
+      if (sawBusyError) {
+        return NextResponse.json(
+          {
+            error:
+              "Server AI Gemini sedang sangat padat sementara. Klik Coba Lagi beberapa detik lagi atau isi pengeluaran manual.",
+          },
+          { status: 503 }
+        );
+      }
       throw lastModelError instanceof Error
         ? lastModelError
-        : new Error("Seluruh model Gemini Flash sedang sibuk, coba lagi sebentar.");
+        : new Error("Seluruh model Gemini sedang sibuk, coba lagi sebentar.");
     }
 
     const rawText = response.text;
@@ -243,11 +281,7 @@ export async function POST(request: Request) {
     });
 
     const todayStr = toJakartaDateKey(new Date());
-
-    const validDate =
-      parsed.receipt_date && /^\d{4}-\d{2}-\d{2}$/.test(parsed.receipt_date)
-        ? parsed.receipt_date
-        : todayStr;
+    const validDate = normalizeReceiptDate(parsed.receipt_date, todayStr);
 
     return NextResponse.json({
       receipt: {
