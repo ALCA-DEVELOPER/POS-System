@@ -228,6 +228,7 @@ export type CustomerFulfillmentStatus =
   | "pending"
   | "preparing"
   | "ready"
+  | "shipping"
   | "completed"
   | "cancelled";
 

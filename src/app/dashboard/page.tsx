@@ -8,6 +8,7 @@ import {
   isMissingTableError,
   toJakartaDateKey,
 } from "@/lib/analytics";
+import { fetchProductPieceFactors } from "@/lib/server/sold-metrics";
 import type { CapitalEntry, Expense, Ingredient, Order, OrderItem } from "@/types/database";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +40,7 @@ export default async function DashboardPage() {
     { data: allOrdersTotals },
     { data: allExpensesTotals },
     { data: capitalRows, error: capitalErr },
+    productPieceFactors,
   ] = await Promise.all([
     supabase
       .from("orders")
@@ -60,6 +62,7 @@ export default async function DashboardPage() {
     supabase.from("orders").select("total_amount").eq("user_id", businessId),
     supabase.from("expenses").select("amount").eq("user_id", businessId),
     supabase.from("capital_entries").select("entry_type, amount").eq("user_id", businessId),
+    fetchProductPieceFactors(supabase, businessId),
   ]);
 
   const totalSalesAllTime = (allOrdersTotals ?? []).reduce(
@@ -99,6 +102,7 @@ export default async function DashboardPage() {
         orderItems30d={orderItems30d}
         expenses30d={(expenses30d as Expense[] | null) ?? []}
         ingredients={(ingredients as Ingredient[] | null) ?? []}
+        productPieceFactors={productPieceFactors}
       />
     </AppShell>
   );

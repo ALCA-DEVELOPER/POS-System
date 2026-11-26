@@ -8,11 +8,19 @@ import {
 } from "@/lib/server/order-ledger";
 import {
   resolveCustomerOrderDelivery,
+  resolveCustomerOrderFulfillmentStatus,
   resolveCustomerOrderPaymentMethod,
+  withShippingFallbackNote,
 } from "@/lib/customer-order-payment";
 
 const patchCustomerOrderSchema = z.object({
-  action: z.enum(["confirm_paid", "mark_ready", "mark_completed", "reject"]),
+  action: z.enum([
+    "confirm_paid",
+    "mark_ready",
+    "mark_shipping",
+    "mark_completed",
+    "reject",
+  ]),
 });
 
 async function requireTeamAccess() {
@@ -128,9 +136,16 @@ export async function PATCH(
     } else if (action === "mark_ready") {
       updates.fulfillment_status = "ready";
       updates.ready_at = existing.ready_at ?? nowIso;
+    } else if (action === "mark_shipping") {
+      updates.fulfillment_status = "shipping";
+      updates.ready_at = existing.ready_at ?? nowIso;
     } else if (action === "mark_completed") {
       updates.fulfillment_status = "completed";
       if (!existing.ready_at) updates.ready_at = nowIso;
+      const cleanedNotes = withShippingFallbackNote(existing.notes, false);
+      if (cleanedNotes !== existing.notes) {
+        updates.notes = cleanedNotes;
+      }
     } else if (action === "reject") {
       if (linkedOrderId) {
         await rollbackOrderAndRestoreStock(admin, profile.business_id, linkedOrderId);
@@ -141,13 +156,34 @@ export async function PATCH(
       updates.linked_order_id = null;
     }
 
-    const { data: updated, error: updateErr } = await admin
+    let { data: updated, error: updateErr } = await admin
       .from("customer_orders")
       .update(updates)
       .eq("id", existing.id)
       .eq("business_id", profile.business_id)
       .select("*")
       .single();
+
+    if (
+      updateErr &&
+      action === "mark_shipping" &&
+      ((updateErr as { code?: string }).code === "23514" ||
+        updateErr.message.includes("customer_orders_fulfillment_status_check"))
+    ) {
+      const retry = await admin
+        .from("customer_orders")
+        .update({
+          fulfillment_status: "ready",
+          ready_at: existing.ready_at ?? nowIso,
+          notes: withShippingFallbackNote(existing.notes, true),
+        })
+        .eq("id", existing.id)
+        .eq("business_id", profile.business_id)
+        .select("*")
+        .single();
+      updated = retry.data;
+      updateErr = retry.error;
+    }
 
     if (updateErr || !updated) {
       return NextResponse.json(
@@ -157,7 +193,14 @@ export async function PATCH(
     }
 
     await notifyRealtime(admin, profile.business_id, updated.id);
-    return NextResponse.json({ order: updated });
+    return NextResponse.json({
+      order: {
+        ...updated,
+        payment_method: resolveCustomerOrderPaymentMethod(updated),
+        ...resolveCustomerOrderDelivery(updated),
+        fulfillment_status: resolveCustomerOrderFulfillmentStatus(updated),
+      },
+    });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Gagal memproses validasi pesanan" },

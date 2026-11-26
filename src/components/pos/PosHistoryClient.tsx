@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { CheckCircle, Receipt, Storefront, Trash } from "@phosphor-icons/react";
+import { useEffect, useMemo, useState } from "react";
+import { CheckCircle, Package, Receipt, Storefront, Trash } from "@phosphor-icons/react";
+import { computeTodaySoldStats } from "@/lib/analytics";
 import {
   formatDateId,
+  formatNumber,
   formatRupiah,
   PAYMENT_METHOD_LABELS,
 } from "@/lib/format";
@@ -18,12 +20,16 @@ interface PosHistoryClientProps {
   isOwner: boolean;
   initialOrders: Order[];
   storeConfig: StorePosConfig;
+  todayKey: string;
+  productPieceFactors?: Record<string, number>;
 }
 
 export function PosHistoryClient({
   isOwner,
   initialOrders,
   storeConfig,
+  todayKey,
+  productPieceFactors = {},
 }: PosHistoryClientProps) {
   const [orders, setOrders] = useState<Order[]>(initialOrders);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -31,6 +37,11 @@ export function PosHistoryClient({
   useEffect(() => {
     setOrders(initialOrders);
   }, [initialOrders]);
+
+  const todaySoldStats = useMemo(
+    () => computeTodaySoldStats(orders, todayKey, productPieceFactors),
+    [orders, todayKey, productPieceFactors]
+  );
   const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -106,6 +117,39 @@ export function PosHistoryClient({
           <span>{successMsg}</span>
         </div>
       ) : null}
+
+      <section className="glass-panel rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-3 tabular-nums">
+        <div className="flex items-center gap-3 rounded-xl bg-emerald-50/85 border border-[#14532D]/20 px-3.5 py-2.5">
+          <div className="w-9 h-9 rounded-lg bg-[#14532D] text-white flex items-center justify-center shrink-0">
+            <Package size={18} weight="duotone" aria-hidden="true" />
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-[#14532D]">Terjual Hari Ini</p>
+            <p className="text-base font-extrabold text-[#1C1917]">
+              {formatNumber(todaySoldStats.pcsCount)} pcs
+              {todaySoldStats.pcsCount !== todaySoldStats.paketCount ? (
+                <span className="text-xs font-bold text-[#14532D] ml-1">
+                  ({formatNumber(todaySoldStats.paketCount)} paket)
+                </span>
+              ) : null}
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-white/80 border border-[#1C1917]/10 px-3.5 py-2.5">
+          <p className="text-[11px] font-medium text-[#44403C]">Transaksi Hari Ini</p>
+          <p className="text-base font-extrabold text-[#1C1917]">
+            {todaySoldStats.transactionCount} transaksi
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-white/80 border border-[#1C1917]/10 px-3.5 py-2.5">
+          <p className="text-[11px] font-medium text-[#44403C]">Omzet Hari Ini</p>
+          <p className="text-base font-extrabold text-[#14532D]">
+            {formatRupiah(todaySoldStats.revenueToday)}
+          </p>
+        </div>
+      </section>
 
       {orders.map((order) => (
         <article

@@ -106,7 +106,7 @@ export async function requireSession(allowedRoles?: UserRole[]): Promise<Session
         .select("id", { count: "exact", head: true })
         .eq("business_id", resolvedProfile.business_id)
         .neq("payment_status", "rejected")
-        .in("fulfillment_status", ["pending", "preparing", "ready"]);
+        .in("fulfillment_status", ["pending", "preparing", "ready", "shipping"]);
       pendingOrdersCount = count ?? 0;
     } catch {
       pendingOrdersCount = 0;

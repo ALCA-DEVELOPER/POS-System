@@ -82,7 +82,7 @@ export function normalizeWhatsAppPhone(phone: string): string {
 export const ORDER_TYPE_LABELS: Record<string, string> = {
   dine_in: "Makan di Tempat",
   takeaway: "Bungkus / Takeaway",
-  online: "Online (GoFood / GrabFood)",
+  online: "Pesanan Web",
 };
 
 export const PAYMENT_METHOD_LABELS: Record<string, string> = {

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   resolveCustomerOrderDelivery,
+  resolveCustomerOrderFulfillmentStatus,
   resolveCustomerOrderPaymentMethod,
 } from "@/lib/customer-order-payment";
 
@@ -43,7 +44,7 @@ export async function GET(
       total_amount: data.total_amount,
       payment_method: resolveCustomerOrderPaymentMethod(data),
       payment_status: data.payment_status,
-      fulfillment_status: data.fulfillment_status,
+      fulfillment_status: resolveCustomerOrderFulfillmentStatus(data),
       notes: data.notes,
       paid_verified_at: data.paid_verified_at,
       ready_at: data.ready_at,

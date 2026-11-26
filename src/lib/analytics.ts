@@ -236,3 +236,86 @@ export function isMissingTableError(
   const msg = err.message ?? "";
   return code === "PGRST205" || code === "42P01" || msg.includes(tableName);
 }
+
+const PACKAGING_INGREDIENT_REGEX =
+  /plastik|kantong|box|kotak|cup|gelas|sendok|garpu|sedotan|tutup|mika|paper|tas|stiker|label/i;
+
+export function extractBundleCount(productName: string): number {
+  const match = /^\s*(\d+)\s+/i.exec(productName.trim());
+  if (!match) return 1;
+  const n = Number(match[1]);
+  return Number.isFinite(n) && n > 1 ? Math.floor(n) : 1;
+}
+
+export function buildProductPieceFactors(
+  recipes: Array<{
+    product_id: string;
+    quantity_needed: number | string;
+    ingredient:
+      | { name?: string | null; unit?: string | null }
+      | Array<{ name?: string | null; unit?: string | null }>
+      | null;
+  }>
+): Record<string, number> {
+  const maxFoodPcsByProduct = new Map<string, number>();
+
+  for (const row of recipes) {
+    const ing = Array.isArray(row.ingredient) ? row.ingredient[0] : row.ingredient;
+    if (!ing || ing.unit !== "pcs") continue;
+    const ingName = (ing.name ?? "").trim();
+    if (!ingName || PACKAGING_INGREDIENT_REGEX.test(ingName)) continue;
+
+    const qty = Math.round(Number(row.quantity_needed || 0));
+    if (qty > 0) {
+      const prev = maxFoodPcsByProduct.get(row.product_id) ?? 0;
+      if (qty > prev) maxFoodPcsByProduct.set(row.product_id, qty);
+    }
+  }
+
+  return Object.fromEntries(maxFoodPcsByProduct.entries());
+}
+
+export interface TodaySoldStats {
+  transactionCount: number;
+  paketCount: number;
+  pcsCount: number;
+  revenueToday: number;
+}
+
+/** Hitung total paket, total pcs isi, dan transaksi terjual pada tanggal hari ini (WIB). */
+export function computeTodaySoldStats(
+  orders: Array<
+    Pick<Order, "created_at" | "total_amount" | "items">
+  >,
+  todayKey: string,
+  productPieceFactors: Record<string, number> = {}
+): TodaySoldStats {
+  let transactionCount = 0;
+  let paketCount = 0;
+  let pcsCount = 0;
+  let revenueToday = 0;
+
+  for (const order of orders) {
+    if (toJakartaDateKey(order.created_at) !== todayKey) continue;
+    transactionCount++;
+    revenueToday += Number(order.total_amount || 0);
+
+    for (const item of order.items ?? []) {
+      const qty = Math.max(0, Number(item.quantity || 0));
+      if (qty <= 0) continue;
+      const bundle = extractBundleCount(item.product_name);
+      const factor = productPieceFactors[item.product_id];
+      const pcsPerUnit = factor && factor > 0 ? factor : bundle;
+
+      paketCount += qty * bundle;
+      pcsCount += qty * pcsPerUnit;
+    }
+  }
+
+  return {
+    transactionCount,
+    paketCount,
+    pcsCount,
+    revenueToday,
+  };
+}

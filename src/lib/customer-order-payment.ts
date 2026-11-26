@@ -1,3 +1,5 @@
+import type { CustomerFulfillmentStatus } from "@/types/database";
+
 export type CustomerOrderDirectMethod = "qris" | "transfer";
 export type CustomerOrderDeliveryMethod = "pickup" | "delivery";
 
@@ -9,6 +11,7 @@ interface FallbackOrderMeta {
   dt?: CustomerOrderDeliveryMethod;
   df?: number;
   da?: string;
+  fs?: "shipping";
 }
 
 function parseFallbackMeta(notes?: string | null): FallbackOrderMeta | null {
@@ -91,6 +94,39 @@ export function resolveCustomerOrderDelivery(order: {
     delivery_fee: 0,
     delivery_address: "",
   };
+}
+
+export function resolveCustomerOrderFulfillmentStatus(order: {
+  fulfillment_status?: string | null;
+  notes?: string | null;
+}): CustomerFulfillmentStatus {
+  const status = order.fulfillment_status;
+  if (status === "completed" || status === "cancelled" || status === "shipping") {
+    return status;
+  }
+  const meta = parseFallbackMeta(order.notes);
+  if (meta?.fs === "shipping" && status === "ready") {
+    return "shipping";
+  }
+  return (status as CustomerFulfillmentStatus) ?? "pending";
+}
+
+export function withShippingFallbackNote(
+  existingNotes: string | null | undefined,
+  shipping: boolean
+): string {
+  const existingMeta = parseFallbackMeta(existingNotes) ?? {};
+  const cleanText = stripInternalPaymentTag(existingNotes);
+  const nextMeta: FallbackOrderMeta = { ...existingMeta };
+  if (shipping) {
+    nextMeta.fs = "shipping";
+  } else {
+    delete nextMeta.fs;
+  }
+  const hasMeta = Boolean(nextMeta.pm || nextMeta.dt || nextMeta.fs);
+  if (!hasMeta) return cleanText;
+  const serialized = `${META_NOTE_PREFIX}${JSON.stringify(nextMeta)}]`;
+  return cleanText ? `${serialized} ${cleanText}` : serialized;
 }
 
 export function getCustomerPaymentMethodLabel(

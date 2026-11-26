@@ -19,6 +19,7 @@ import {
   CashRegister,
   ChartLineUp,
   Coins,
+  Package,
   Warning,
   Wallet,
 } from "@phosphor-icons/react";
@@ -27,6 +28,7 @@ import {
   buildExpenseBreakdown,
   buildTopProfitableProducts,
   computeFinancialSummary,
+  computeTodaySoldStats,
   diffDaysFromTodayWib,
   toJakartaDateKey,
 } from "@/lib/analytics";
@@ -53,6 +55,7 @@ interface DashboardClientProps {
   orderItems30d: OrderItem[];
   expenses30d: Expense[];
   ingredients: Ingredient[];
+  productPieceFactors?: Record<string, number>;
 }
 
 export function DashboardClient({
@@ -65,6 +68,7 @@ export function DashboardClient({
   orderItems30d,
   expenses30d,
   ingredients,
+  productPieceFactors = {},
 }: DashboardClientProps) {
   const [trendRange, setTrendRange] = useState<7 | 30>(7);
   const [mounted, setMounted] = useState(false);
@@ -78,6 +82,11 @@ export function DashboardClient({
     const todayExpenses = expenses30d.filter((e) => e.expense_date === todayKey);
     return computeFinancialSummary(todayOrders, todayExpenses);
   }, [orders30d, expenses30d, todayKey]);
+
+  const todaySoldStats = useMemo(
+    () => computeTodaySoldStats(orders30d, todayKey, productPieceFactors),
+    [orders30d, todayKey, productPieceFactors]
+  );
 
   const dailySeries = useMemo(
     () => buildDailyTrendSeries(orders30d, expenses30d, trendRange, todayKey),
@@ -157,46 +166,70 @@ export function DashboardClient({
           </div>
         </div>
 
-        <div className="lg:col-span-7 grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="rounded-xl bg-white/75 border border-[#1C1917]/10 p-3.5 space-y-1">
-            <p className="text-xs font-medium text-[#44403C]">Pemasukan Hari Ini</p>
-            <p className="text-base sm:text-lg font-extrabold text-[#14532D] tabular-nums">
-              {formatRupiah(todaySummary.revenue)}
-            </p>
-            <p className="text-[11px] text-[#44403C] tabular-nums">
-              {todaySummary.orderCount} transaksi
-            </p>
+        <div className="lg:col-span-7 space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="rounded-xl bg-white/75 border border-[#1C1917]/10 p-3.5 space-y-1">
+              <p className="text-xs font-medium text-[#44403C]">Pemasukan Hari Ini</p>
+              <p className="text-base sm:text-lg font-extrabold text-[#14532D] tabular-nums">
+                {formatRupiah(todaySummary.revenue)}
+              </p>
+              <p className="text-[11px] text-[#44403C] tabular-nums">
+                {todaySummary.orderCount} transaksi · {formatNumber(todaySoldStats.pcsCount)} pcs
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-white/75 border border-[#1C1917]/10 p-3.5 space-y-1">
+              <p className="text-xs font-medium text-[#44403C]">Pengeluaran Hari Ini</p>
+              <p className="text-base sm:text-lg font-extrabold text-[#B43D0A] tabular-nums">
+                {formatRupiah(todaySummary.totalExpenses)}
+              </p>
+              <p className="text-[11px] text-[#44403C]">Belanja & operasional</p>
+            </div>
+
+            <div className="rounded-xl bg-white/75 border border-[#1C1917]/10 p-3.5 space-y-1">
+              <p className="text-xs font-medium text-[#44403C]">Laba Kotor Hari Ini</p>
+              <p className="text-base sm:text-lg font-extrabold text-[#1C1917] tabular-nums">
+                {formatRupiah(todaySummary.grossProfit)}
+              </p>
+              <p className="text-[11px] text-[#44403C] tabular-nums">
+                HPP: {formatRupiah(todaySummary.hppTotal)}
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-white/75 border border-[#1C1917]/10 p-3.5 space-y-1">
+              <p className="text-xs font-medium text-[#44403C]">Laba Bersih Hari Ini</p>
+              <p
+                className={`text-base sm:text-lg font-extrabold tabular-nums ${
+                  todaySummary.netProfit < 0 ? "text-[#B91C1C]" : "text-[#14532D]"
+                }`}
+              >
+                {formatRupiah(todaySummary.netProfit)}
+              </p>
+              <p className="text-[11px] font-semibold text-[#44403C] tabular-nums">
+                Margin: {todaySummary.netMarginPercent.toFixed(1)}%
+              </p>
+            </div>
           </div>
 
-          <div className="rounded-xl bg-white/75 border border-[#1C1917]/10 p-3.5 space-y-1">
-            <p className="text-xs font-medium text-[#44403C]">Pengeluaran Hari Ini</p>
-            <p className="text-base sm:text-lg font-extrabold text-[#B43D0A] tabular-nums">
-              {formatRupiah(todaySummary.totalExpenses)}
-            </p>
-            <p className="text-[11px] text-[#44403C]">Belanja & operasional</p>
-          </div>
-
-          <div className="rounded-xl bg-white/75 border border-[#1C1917]/10 p-3.5 space-y-1">
-            <p className="text-xs font-medium text-[#44403C]">Laba Kotor Hari Ini</p>
-            <p className="text-base sm:text-lg font-extrabold text-[#1C1917] tabular-nums">
-              {formatRupiah(todaySummary.grossProfit)}
-            </p>
-            <p className="text-[11px] text-[#44403C] tabular-nums">
-              HPP: {formatRupiah(todaySummary.hppTotal)}
-            </p>
-          </div>
-
-          <div className="rounded-xl bg-white/75 border border-[#1C1917]/10 p-3.5 space-y-1">
-            <p className="text-xs font-medium text-[#44403C]">Laba Bersih Hari Ini</p>
-            <p
-              className={`text-base sm:text-lg font-extrabold tabular-nums ${
-                todaySummary.netProfit < 0 ? "text-[#B91C1C]" : "text-[#14532D]"
-              }`}
-            >
-              {formatRupiah(todaySummary.netProfit)}
-            </p>
-            <p className="text-[11px] font-semibold text-[#44403C] tabular-nums">
-              Margin: {todaySummary.netMarginPercent.toFixed(1)}%
+          <div className="rounded-xl bg-emerald-50/85 border border-[#14532D]/20 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#14532D] text-white flex items-center justify-center shrink-0">
+                <Package size={20} weight="duotone" aria-hidden="true" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-[#14532D]">Terjual Hari Ini</p>
+                <p className="text-lg sm:text-xl font-extrabold text-[#1C1917] tabular-nums">
+                  {formatNumber(todaySoldStats.pcsCount)} pcs
+                  {todaySoldStats.pcsCount !== todaySoldStats.paketCount ? (
+                    <span className="text-xs sm:text-sm font-bold text-[#14532D] ml-1.5">
+                      ({formatNumber(todaySoldStats.paketCount)} paket)
+                    </span>
+                  ) : null}
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-[#44403C] tabular-nums">
+              Total dari <strong>{todaySoldStats.transactionCount}</strong> transaksi hari ini
             </p>
           </div>
         </div>

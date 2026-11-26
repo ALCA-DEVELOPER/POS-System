@@ -52,13 +52,21 @@ export function buildEscPosReceipt(
     lines.push(padLine(qtyPrice, formatRupiah(item.subtotal), cols));
   }
 
+  const serviceLabel = order.order_type === "online" ? "Ongkir" : "Servis";
+  const paymentLabel =
+    PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method;
+  const isUnpaidOnline =
+    order.order_type === "online" &&
+    Number(order.amount_paid) === 0 &&
+    order.payment_method !== "cash";
+
   lines.push(divider);
   lines.push(padLine("Subtotal", formatRupiah(order.subtotal), cols));
   if (Number(order.discount_amount) > 0) {
     lines.push(padLine("Diskon", `-${formatRupiah(order.discount_amount)}`, cols));
   }
   if (Number(order.service_amount) > 0) {
-    lines.push(padLine("Servis", formatRupiah(order.service_amount), cols));
+    lines.push(padLine(serviceLabel, formatRupiah(order.service_amount), cols));
   }
   if (Number(order.tax_amount) > 0) {
     lines.push(padLine("Pajak", formatRupiah(order.tax_amount), cols));
@@ -66,8 +74,8 @@ export function buildEscPosReceipt(
   lines.push(padLine("TOTAL", formatRupiah(order.total_amount), cols));
   lines.push(
     padLine(
-      `Bayar (${PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method})`,
-      formatRupiah(order.amount_paid),
+      `Bayar (${paymentLabel})`,
+      isUnpaidOnline ? "Belum Lunas" : formatRupiah(order.amount_paid),
       cols
     )
   );
@@ -194,20 +202,30 @@ export function buildWhatsAppReceiptText(order: Order, store: StorePosConfig): s
     );
   }
 
+  const serviceLabel = order.order_type === "online" ? "Ongkir" : "Servis";
+  const paymentLabel =
+    PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method;
+  const isUnpaidOnline =
+    order.order_type === "online" &&
+    Number(order.amount_paid) === 0 &&
+    order.payment_method !== "cash";
+
   lines.push("------------------------");
   lines.push(`Subtotal: ${formatRupiah(order.subtotal)}`);
   if (Number(order.discount_amount) > 0) {
     lines.push(`Diskon: -${formatRupiah(order.discount_amount)}`);
   }
   if (Number(order.service_amount) > 0) {
-    lines.push(`Servis: ${formatRupiah(order.service_amount)}`);
+    lines.push(`${serviceLabel}: ${formatRupiah(order.service_amount)}`);
   }
   if (Number(order.tax_amount) > 0) {
     lines.push(`Pajak: ${formatRupiah(order.tax_amount)}`);
   }
   lines.push(`*TOTAL: ${formatRupiah(order.total_amount)}*`);
   lines.push(
-    `Bayar (${PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method}): ${formatRupiah(order.amount_paid)}`
+    isUnpaidOnline
+      ? `Bayar (${paymentLabel}): Menunggu Validasi`
+      : `Bayar (${paymentLabel}): ${formatRupiah(order.amount_paid)}`
   );
   if (order.payment_method === "cash") {
     lines.push(`Kembali: ${formatRupiah(order.change_amount)}`);

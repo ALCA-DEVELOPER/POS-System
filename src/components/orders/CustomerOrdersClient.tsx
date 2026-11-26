@@ -14,6 +14,7 @@ import {
   ImageSquare,
   MapPin,
   Package,
+  Receipt,
   ShoppingBag,
   SlidersHorizontal,
   Trash,
@@ -29,16 +30,20 @@ import {
   getCustomerPaymentMethodLabel,
   isCustomerOrderActive,
   resolveCustomerOrderDelivery,
+  resolveCustomerOrderFulfillmentStatus,
   resolveCustomerOrderPaymentMethod,
   stripInternalPaymentTag,
 } from "@/lib/customer-order-payment";
 import type {
   CustomerOrder,
+  Order,
   Product,
+  StorePosConfig,
   StorefrontSettings,
 } from "@/types/database";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState, ErrorState } from "@/components/ui/StatePanel";
+import { ReceiptModal } from "@/components/pos/ReceiptModal";
 
 const CUSTOMER_ORDERS_MIGRATION_SQL = `CREATE TABLE IF NOT EXISTS public.customer_orders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -53,7 +58,7 @@ const CUSTOMER_ORDERS_MIGRATION_SQL = `CREATE TABLE IF NOT EXISTS public.custome
   total_amount NUMERIC(14,2) NOT NULL CHECK (total_amount >= 0),
   payment_method TEXT NOT NULL DEFAULT 'qris' CHECK (payment_method IN ('qris', 'transfer')),
   payment_status TEXT NOT NULL DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'rejected')),
-  fulfillment_status TEXT NOT NULL DEFAULT 'pending' CHECK (fulfillment_status IN ('pending', 'preparing', 'ready', 'completed', 'cancelled')),
+  fulfillment_status TEXT NOT NULL DEFAULT 'pending' CHECK (fulfillment_status IN ('pending', 'preparing', 'ready', 'shipping', 'completed', 'cancelled')),
   delivery_type TEXT NOT NULL DEFAULT 'pickup' CHECK (delivery_type IN ('pickup', 'delivery')),
   delivery_fee NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0),
   delivery_address TEXT NOT NULL DEFAULT '',
@@ -194,6 +199,7 @@ interface CustomerOrdersClientProps {
   isOwner: boolean;
   businessId: string;
   businessName: string;
+  storeConfig: StorePosConfig;
   bankSummary?: string;
   initialOrders: CustomerOrder[];
   initialSettings: StorefrontSettings;
@@ -205,6 +211,7 @@ export function CustomerOrdersClient({
   isOwner,
   businessId,
   businessName,
+  storeConfig,
   bankSummary = "",
   initialOrders,
   initialSettings,
@@ -219,6 +226,7 @@ export function CustomerOrdersClient({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [receiptOrder, setReceiptOrder] = useState<CustomerOrder | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CustomerOrder | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -446,9 +454,10 @@ export function CustomerOrdersClient({
     for (const o of orders) {
       if (!isCustomerOrderActive(o)) continue;
       active++;
+      const fStatus = resolveCustomerOrderFulfillmentStatus(o);
       if (o.payment_status === "pending") unpaid++;
-      if (o.payment_status === "paid" && o.fulfillment_status === "preparing") preparing++;
-      if (o.fulfillment_status === "ready") ready++;
+      if (o.payment_status === "paid" && fStatus === "preparing") preparing++;
+      if (fStatus === "ready" || fStatus === "shipping") ready++;
     }
     return { unpaid, preparing, ready, active };
   }, [orders]);
@@ -467,21 +476,29 @@ export function CustomerOrdersClient({
   }, [orders, filter]);
 
   const handleCopyStoreLink = async () => {
-    const url = `${window.location.origin}/pesan`;
-    await navigator.clipboard.writeText(url);
-    setCopiedLink(true);
-    window.setTimeout(() => setCopiedLink(false), 2000);
+    try {
+      const url = `${window.location.origin}/pesan`;
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      window.setTimeout(() => setCopiedLink(false), 2000);
+    } catch {
+      setErrorMsg("Browser memblokir salin otomatis.");
+    }
   };
 
   const handleCopySql = async () => {
-    await navigator.clipboard.writeText(CUSTOMER_ORDERS_MIGRATION_SQL);
-    setCopiedSql(true);
-    window.setTimeout(() => setCopiedSql(false), 2000);
+    try {
+      await navigator.clipboard.writeText(CUSTOMER_ORDERS_MIGRATION_SQL);
+      setCopiedSql(true);
+      window.setTimeout(() => setCopiedSql(false), 2000);
+    } catch {
+      setErrorMsg("Browser memblokir salin otomatis.");
+    }
   };
 
   const runAction = async (
     order: CustomerOrder,
-    action: "confirm_paid" | "mark_ready" | "mark_completed" | "reject"
+    action: "confirm_paid" | "mark_ready" | "mark_shipping" | "mark_completed" | "reject"
   ) => {
     setBusyId(order.id);
     setErrorMsg(null);
@@ -509,6 +526,8 @@ export function CustomerOrdersClient({
         void broadcastBusinessUpdate(updated.business_id, "orders");
       } else if (action === "mark_ready") {
         setSuccessMsg(`Pesanan ${updated.order_number} ditandai SUDAH JADI.`);
+      } else if (action === "mark_shipping") {
+        setSuccessMsg(`Pesanan ${updated.order_number} ditandai SEDANG DIANTAR ke kos.`);
       } else if (action === "mark_completed") {
         setSuccessMsg(`Pesanan ${updated.order_number} ditandai SELESAI.`);
       } else {
@@ -558,17 +577,60 @@ export function CustomerOrdersClient({
       resolveCustomerOrderPaymentMethod(order)
     );
     const delivery = resolveCustomerOrderDelivery(order);
+    const status = resolveCustomerOrderFulfillmentStatus(order);
     const readySuffix =
       delivery.delivery_type === "delivery"
         ? ` dan siap diantar ke alamat: ${delivery.delivery_address || "kos Anda"} ya!`
         : ` dan bisa diambil / COD sesuai jadwal (${pickupInfo.trim() || "Telkom University Purwokerto"}) ya!`;
     const text =
-      order.fulfillment_status === "ready"
-        ? `Halo Kak ${order.customer_name}, pesanan ${order.order_number} (${order.quantity}x ${order.product_name}) di ${businessName || "Nummie"} sudah jadi${readySuffix}`
-        : order.payment_status === "paid"
-          ? `Halo Kak ${order.customer_name}, pembayaran ${methodLabel} pesanan ${order.order_number} sudah kami terima dan sedang dibuat ya.`
-          : `Halo Kak ${order.customer_name}, mengenai pesanan ${order.order_number} (${order.quantity}x ${order.product_name}) total ${formatRupiah(order.total_amount)}, bisa bantu kirim bukti bayar ${methodLabel}-nya?`;
+      status === "shipping"
+        ? `Halo Kak ${order.customer_name}, pesanan ${order.order_number} (${order.quantity}x ${order.product_name}) dari ${businessName || "Nummie"} sedang dalam pengantaran ke ${delivery.delivery_address || "alamat kos Anda"} ya. Mohon ditunggu!`
+        : status === "ready"
+          ? `Halo Kak ${order.customer_name}, pesanan ${order.order_number} (${order.quantity}x ${order.product_name}) di ${businessName || "Nummie"} sudah jadi${readySuffix}`
+          : order.payment_status === "paid"
+            ? `Halo Kak ${order.customer_name}, pembayaran ${methodLabel} pesanan ${order.order_number} sudah kami terima dan sedang dibuat ya.`
+            : `Halo Kak ${order.customer_name}, mengenai pesanan ${order.order_number} (${order.quantity}x ${order.product_name}) total ${formatRupiah(order.total_amount)}, bisa bantu kirim bukti bayar ${methodLabel}-nya?`;
     return `https://wa.me/${wa}?text=${encodeURIComponent(text)}`;
+  };
+
+  const buildReceiptOrder = (customerOrder: CustomerOrder): Order => {
+    const delivery = resolveCustomerOrderDelivery(customerOrder);
+    const method = resolveCustomerOrderPaymentMethod(customerOrder);
+    const menuSubtotal =
+      Number(customerOrder.unit_price) * Number(customerOrder.quantity);
+    const deliveryTag =
+      delivery.delivery_type === "delivery"
+        ? `Antar Kos: ${delivery.delivery_address || "-"}`
+        : "Ambil / COD";
+    return {
+      id: customerOrder.linked_order_id ?? customerOrder.id,
+      order_number: customerOrder.order_number,
+      subtotal: menuSubtotal,
+      discount_amount: 0,
+      tax_amount: 0,
+      service_amount: delivery.delivery_fee,
+      total_amount: Number(customerOrder.total_amount),
+      amount_paid:
+        customerOrder.payment_status === "paid"
+          ? Number(customerOrder.total_amount)
+          : 0,
+      change_amount: 0,
+      payment_method: method,
+      order_type: "online",
+      customer_phone: customerOrder.customer_phone,
+      notes: `${customerOrder.customer_name} (${deliveryTag})`,
+      created_at: customerOrder.created_at,
+      items: [
+        {
+          id: customerOrder.id,
+          product_id: customerOrder.product_id,
+          product_name: customerOrder.product_name,
+          quantity: Number(customerOrder.quantity),
+          unit_price: Number(customerOrder.unit_price),
+          subtotal: menuSubtotal,
+        },
+      ],
+    };
   };
 
   if (tableMissing) {
@@ -1253,23 +1315,29 @@ export function CustomerOrdersClient({
 
                       <span
                         className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-                          order.fulfillment_status === "ready" ||
-                          order.fulfillment_status === "completed"
-                            ? "bg-[#14532D] text-white"
-                            : order.fulfillment_status === "preparing"
-                              ? "bg-[#B43D0A]/15 text-[#B43D0A]"
-                              : "bg-black/8 text-[#44403C]"
+                          resolveCustomerOrderFulfillmentStatus(order) === "shipping"
+                            ? "bg-[#0369A1] text-white"
+                            : order.fulfillment_status === "ready" ||
+                                order.fulfillment_status === "completed"
+                              ? "bg-[#14532D] text-white"
+                              : order.fulfillment_status === "preparing"
+                                ? "bg-[#B43D0A]/15 text-[#B43D0A]"
+                                : "bg-black/8 text-[#44403C]"
                         }`}
                       >
-                        {order.fulfillment_status === "completed"
-                          ? "Selesai Diambil"
-                          : order.fulfillment_status === "ready"
-                            ? "Sudah Jadi"
-                            : order.fulfillment_status === "preparing"
-                              ? "Sedang Dibuat"
-                              : order.fulfillment_status === "cancelled"
-                                ? "Dibatalkan"
-                                : "Menunggu Validasi"}
+                        {(() => {
+                          const fStatus = resolveCustomerOrderFulfillmentStatus(order);
+                          if (fStatus === "completed") {
+                            return delivery.delivery_type === "delivery"
+                              ? "Sudah Diantar / Selesai"
+                              : "Selesai Diambil";
+                          }
+                          if (fStatus === "shipping") return "Sedang Diantar";
+                          if (fStatus === "ready") return "Sudah Jadi";
+                          if (fStatus === "preparing") return "Sedang Dibuat";
+                          if (fStatus === "cancelled") return "Dibatalkan";
+                          return "Menunggu Validasi";
+                        })()}
                       </span>
                     </div>
 
@@ -1348,8 +1416,8 @@ export function CustomerOrdersClient({
                     ) : null}
 
                     {order.payment_status === "paid" &&
-                    (order.fulfillment_status === "pending" ||
-                      order.fulfillment_status === "preparing") ? (
+                    (resolveCustomerOrderFulfillmentStatus(order) === "pending" ||
+                      resolveCustomerOrderFulfillmentStatus(order) === "preparing") ? (
                       <button
                         type="button"
                         disabled={isBusy}
@@ -1361,7 +1429,32 @@ export function CustomerOrdersClient({
                       </button>
                     ) : null}
 
-                    {order.fulfillment_status === "ready" ? (
+                    {resolveCustomerOrderFulfillmentStatus(order) === "ready" &&
+                    delivery.delivery_type === "delivery" ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => void runAction(order, "mark_shipping")}
+                          className="min-h-10 inline-flex items-center gap-1.5 rounded-xl bg-[#0369A1] px-3.5 py-2 text-xs font-bold text-white hover:bg-[#075985] disabled:opacity-60 cursor-pointer"
+                        >
+                          <Truck size={16} weight="bold" aria-hidden="true" />
+                          {isBusy ? "Memproses..." : "Kirim / Antar Pesanan"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => void runAction(order, "mark_completed")}
+                          className="min-h-10 inline-flex items-center gap-1.5 rounded-xl bg-[#14532D] px-3.5 py-2 text-xs font-bold text-white hover:bg-[#166534] disabled:opacity-60 cursor-pointer"
+                        >
+                          <CheckCircle size={16} weight="bold" aria-hidden="true" />
+                          {isBusy ? "Memproses..." : "Sudah Diantar / Selesai"}
+                        </button>
+                      </>
+                    ) : null}
+
+                    {resolveCustomerOrderFulfillmentStatus(order) === "ready" &&
+                    delivery.delivery_type !== "delivery" ? (
                       <button
                         type="button"
                         disabled={isBusy}
@@ -1373,6 +1466,27 @@ export function CustomerOrdersClient({
                       </button>
                     ) : null}
 
+                    {resolveCustomerOrderFulfillmentStatus(order) === "shipping" ? (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => void runAction(order, "mark_completed")}
+                        className="min-h-10 inline-flex items-center gap-1.5 rounded-xl bg-[#14532D] px-3.5 py-2 text-xs font-bold text-white hover:bg-[#166534] disabled:opacity-60 cursor-pointer"
+                      >
+                        <CheckCircle size={16} weight="bold" aria-hidden="true" />
+                        {isBusy ? "Memproses..." : "Sudah Diantar / Selesai"}
+                      </button>
+                    ) : null}
+
+                    <button
+                      type="button"
+                      onClick={() => setReceiptOrder(order)}
+                      className="min-h-10 inline-flex items-center gap-1.5 rounded-xl border border-[#1C1917]/20 bg-white px-3 py-2 text-xs font-bold text-[#1C1917] hover:bg-black/5 cursor-pointer"
+                    >
+                      <Receipt size={16} weight="duotone" aria-hidden="true" />
+                      Struk
+                    </button>
+
                     {waLink ? (
                       <a
                         href={waLink}
@@ -1381,7 +1495,9 @@ export function CustomerOrdersClient({
                         className="min-h-10 inline-flex items-center gap-1.5 rounded-xl border border-[#14532D]/30 bg-white px-3 py-2 text-xs font-bold text-[#14532D] hover:bg-emerald-50"
                       >
                         <WhatsappLogo size={16} weight="bold" aria-hidden="true" />
-                        Chat WA Pembeli
+                        {resolveCustomerOrderFulfillmentStatus(order) === "shipping"
+                          ? "Chat Info Antar (WA)"
+                          : "Chat WA Pembeli"}
                       </a>
                     ) : null}
                   </div>
@@ -1402,6 +1518,12 @@ export function CustomerOrdersClient({
       )}
         </>
       )}
+
+      <ReceiptModal
+        order={receiptOrder ? buildReceiptOrder(receiptOrder) : null}
+        store={storeConfig}
+        onClose={() => setReceiptOrder(null)}
+      />
 
       {/* Delete Confirm Modal */}
       <Modal

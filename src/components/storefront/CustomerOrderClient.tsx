@@ -227,6 +227,14 @@ export function CustomerOrderClient({
         const res = await fetch(`/api/public/orders/${encodeURIComponent(orderId)}`, {
           cache: "no-store",
         });
+        if (res.status === 404 && !cancelled) {
+          if (typeof window !== "undefined") {
+            window.localStorage.removeItem(LAST_ORDER_STORAGE_KEY);
+            window.history.replaceState(null, "", "/pesan");
+          }
+          setTrackedOrder(null);
+          return;
+        }
         if (!res.ok || cancelled) return;
         const json = await res.json();
         if (!cancelled && json?.order) {
@@ -602,13 +610,21 @@ export function CustomerOrderClient({
               <div
                 className={`rounded-xl border p-3.5 flex items-start gap-3 ${
                   trackedOrder.fulfillment_status === "ready" ||
+                  trackedOrder.fulfillment_status === "shipping" ||
                   trackedOrder.fulfillment_status === "completed"
                     ? "border-[#14532D]/30 bg-emerald-50"
                     : "border-[#1C1917]/10 bg-white/75"
                 }`}
               >
-                {trackedOrder.fulfillment_status === "ready" ||
-                trackedOrder.fulfillment_status === "completed" ? (
+                {trackedOrder.fulfillment_status === "shipping" ? (
+                  <Truck
+                    size={20}
+                    weight="fill"
+                    className="text-[#14532D] shrink-0 mt-0.5"
+                    aria-hidden="true"
+                  />
+                ) : trackedOrder.fulfillment_status === "ready" ||
+                  trackedOrder.fulfillment_status === "completed" ? (
                   <CheckCircle
                     size={20}
                     weight="fill"
@@ -629,14 +645,16 @@ export function CustomerOrderClient({
                   </p>
                   <p className="text-xs text-[#44403C]">
                     {trackedOrder.fulfillment_status === "completed"
-                      ? "Pesanan selesai dan sudah diambil. Terima kasih sudah berbelanja!"
-                      : trackedOrder.fulfillment_status === "ready"
-                        ? "Pesanan Anda sudah jadi."
-                        : trackedOrder.fulfillment_status === "preparing"
-                          ? "Pesanan Anda sedang dibuat oleh tim dapur."
-                          : trackedOrder.fulfillment_status === "cancelled"
-                            ? "Pesanan dibatalkan."
-                            : "Menunggu konfirmasi pembayaran untuk mulai dibuat."}
+                      ? "Pesanan selesai dan sudah diterima. Terima kasih sudah berbelanja!"
+                      : trackedOrder.fulfillment_status === "shipping"
+                        ? "Pesanan Anda sedang dalam perjalanan diantar ke alamat kos Anda!"
+                        : trackedOrder.fulfillment_status === "ready"
+                          ? "Pesanan Anda sudah jadi."
+                          : trackedOrder.fulfillment_status === "preparing"
+                            ? "Pesanan Anda sedang dibuat oleh tim dapur."
+                            : trackedOrder.fulfillment_status === "cancelled"
+                              ? "Pesanan dibatalkan."
+                              : "Menunggu konfirmasi pembayaran untuk mulai dibuat."}
                   </p>
                 </div>
               </div>

@@ -4,6 +4,7 @@ import { getPublicStorefrontData } from "@/lib/server/storefront";
 import { CustomerOrderClient } from "@/components/storefront/CustomerOrderClient";
 import {
   resolveCustomerOrderDelivery,
+  resolveCustomerOrderFulfillmentStatus,
   resolveCustomerOrderPaymentMethod,
 } from "@/lib/customer-order-payment";
 import type { CustomerOrder } from "@/types/database";
@@ -43,6 +44,7 @@ export default async function PublicOrderPage({
         ...(data as CustomerOrder),
         payment_method: resolveCustomerOrderPaymentMethod(data),
         ...resolveCustomerOrderDelivery(data),
+        fulfillment_status: resolveCustomerOrderFulfillmentStatus(data),
       };
     }
   }

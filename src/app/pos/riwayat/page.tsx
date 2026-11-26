@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { AppShell } from "@/components/layout/AppShell";
 import { SchemaMissingNotice } from "@/components/ui/SchemaMissingNotice";
 import { PosHistoryClient } from "@/components/pos/PosHistoryClient";
+import { toJakartaDateKey } from "@/lib/analytics";
+import { fetchProductPieceFactors } from "@/lib/server/sold-metrics";
 import type { Order, StorePosConfig } from "@/types/database";
 
 export const dynamic = "force-dynamic";
@@ -48,10 +50,12 @@ export default async function PosHistoryPage() {
     }
   }
 
-  const [{ data: orders }, { data: storeRows }] = await Promise.all([
+  const [{ data: orders }, { data: storeRows }, productPieceFactors] = await Promise.all([
     ordersQuery,
     supabase.rpc("get_store_pos_config"),
+    fetchProductPieceFactors(admin, session.profile.business_id),
   ]);
+  const todayKey = toJakartaDateKey(new Date());
 
   const storeConfig: StorePosConfig = (storeRows?.[0] as StorePosConfig | undefined) ?? {
     business_id: session.profile.business_id,
@@ -80,6 +84,8 @@ export default async function PosHistoryPage() {
         isOwner={isOwner}
         initialOrders={(orders as Order[] | null) ?? []}
         storeConfig={storeConfig}
+        todayKey={todayKey}
+        productPieceFactors={productPieceFactors}
       />
     </AppShell>
   );

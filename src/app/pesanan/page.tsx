@@ -8,8 +8,10 @@ import { CustomerOrdersClient } from "@/components/orders/CustomerOrdersClient";
 import type {
   CustomerOrder,
   Product,
+  StorePosConfig,
   StorefrontSettings,
 } from "@/types/database";
+import { resolveCustomerOrderFulfillmentStatus } from "@/lib/customer-order-payment";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -57,7 +59,24 @@ export default async function CustomerOrdersPage() {
 
   const initialOrders = ordersTableMissing
     ? []
-    : ((rows as CustomerOrder[] | null) ?? []);
+    : ((rows as CustomerOrder[] | null) ?? []).map((row) => ({
+        ...row,
+        fulfillment_status: resolveCustomerOrderFulfillmentStatus(row),
+      }));
+
+  const storeConfig: StorePosConfig = {
+    business_id: session.profile.business_id,
+    business_name: session.profile.business_name,
+    phone: session.profile.phone,
+    address: session.profile.address,
+    logo_url: session.profile.logo_url,
+    qris_image_url: session.profile.qris_image_url,
+    bank_name: session.profile.bank_name,
+    bank_account_number: session.profile.bank_account_number,
+    bank_account_holder: session.profile.bank_account_holder,
+    tax_rate: session.profile.tax_rate,
+    service_charge_rate: session.profile.service_charge_rate,
+  };
 
   const defaults = buildDefaultStorefrontSettings(businessId);
   const initialSettings: StorefrontSettings =
@@ -92,6 +111,7 @@ export default async function CustomerOrdersPage() {
         isOwner={isOwner}
         businessId={businessId}
         businessName={session.profile.business_name}
+        storeConfig={storeConfig}
         bankSummary={
           session.profile.bank_account_number
             ? `${session.profile.bank_name || "Bank"} · ${session.profile.bank_account_number}${

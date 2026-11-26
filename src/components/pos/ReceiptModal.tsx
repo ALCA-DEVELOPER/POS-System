@@ -5,7 +5,10 @@ import {
   Bluetooth,
   CheckCircle,
   Copy,
+  DownloadSimple,
+  ImageSquare,
   Printer,
+  ShareNetwork,
   WhatsappLogo,
 } from "@phosphor-icons/react";
 import {
@@ -19,6 +22,7 @@ import {
   getWhatsAppShareUrl,
   printViaBluetoothThermal,
 } from "@/lib/printer/escpos";
+import { renderReceiptToImageBlob } from "@/lib/printer/receipt-image";
 import type { Order, StorePosConfig } from "@/types/database";
 import { Modal } from "@/components/ui/Modal";
 
@@ -32,6 +36,7 @@ export function ReceiptModal({ order, store, onClose }: ReceiptModalProps) {
   const [paperWidth, setPaperWidth] = useState<58 | 80>(58);
   const [waPhone, setWaPhone] = useState(order?.customer_phone ?? "");
   const [printingBt, setPrintingBt] = useState(false);
+  const [exportingImg, setExportingImg] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -65,10 +70,100 @@ export function ReceiptModal({ order, store, onClose }: ReceiptModalProps) {
   };
 
   const handleCopyText = async () => {
-    await navigator.clipboard.writeText(receiptText);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(receiptText);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setErrorMsg("Browser memblokir salin otomatis. Salin manual teks struk.");
+    }
   };
+
+  const handleDownloadImage = async (format: "png" | "webp") => {
+    setExportingImg(format);
+    setStatusMsg(null);
+    setErrorMsg(null);
+    try {
+      const { blob, actualFormat } = await renderReceiptToImageBlob(
+        order,
+        store,
+        format
+      );
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Struk-${order.order_number}.${actualFormat}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setStatusMsg(
+        `Gambar struk ${actualFormat.toUpperCase()} siap disimpan dan dikirim.`
+      );
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : "Gagal mengekspor gambar struk."
+      );
+    } finally {
+      setExportingImg(null);
+    }
+  };
+
+  const handleShareOrCopyImage = async () => {
+    setExportingImg("share");
+    setStatusMsg(null);
+    setErrorMsg(null);
+    try {
+      const { blob } = await renderReceiptToImageBlob(order, store, "png");
+      const file = new File([blob], `Struk-${order.order_number}.png`, {
+        type: "image/png",
+      });
+
+      if (
+        typeof navigator !== "undefined" &&
+        typeof navigator.canShare === "function" &&
+        navigator.canShare({ files: [file] })
+      ) {
+        await navigator.share({
+          files: [file],
+          title: `Struk ${order.order_number}`,
+        });
+        setStatusMsg("Gambar struk dibagikan.");
+        return;
+      }
+
+      if (
+        typeof navigator !== "undefined" &&
+        navigator.clipboard &&
+        typeof ClipboardItem !== "undefined"
+      ) {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        setStatusMsg(
+          "Gambar struk PNG disalin ke clipboard (bisa langsung tempel/paste di WhatsApp Web)."
+        );
+        return;
+      }
+
+      await handleDownloadImage("png");
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return;
+      }
+      setErrorMsg(
+        err instanceof Error ? err.message : "Gagal membagikan gambar struk."
+      );
+    } finally {
+      setExportingImg(null);
+    }
+  };
+
+  const extraChargeLabel = order.order_type === "online" ? "Ongkir" : "Servis";
+  const paymentLabel =
+    PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method;
+  const isUnpaidOnline =
+    order.order_type === "online" &&
+    Number(order.amount_paid) === 0 &&
+    order.payment_method !== "cash";
 
   return (
     <Modal
@@ -79,7 +174,7 @@ export function ReceiptModal({ order, store, onClose }: ReceiptModalProps) {
     >
       <div className="space-y-4">
         {/* Visual Thermal Receipt Preview (also printable) */}
-        <div className="mx-auto max-w-[300px] rounded-xl border border-dashed border-[#1C1917]/30 bg-white p-4 text-xs text-[#1C1917] space-y-2 shadow-xs">
+        <div className="receipt-print-sheet mx-auto max-w-[300px] rounded-xl border border-dashed border-[#1C1917]/30 bg-white p-4 text-xs text-[#1C1917] space-y-2 shadow-xs">
           <div className="text-center space-y-0.5 pb-2 border-b border-dashed border-[#1C1917]/25">
             <p className="text-sm font-extrabold uppercase">
               {store.business_name || "KulinerKas"}
@@ -125,7 +220,7 @@ export function ReceiptModal({ order, store, onClose }: ReceiptModalProps) {
             ) : null}
             {Number(order.service_amount) > 0 ? (
               <div className="flex justify-between">
-                <span>Servis</span>
+                <span>{extraChargeLabel}</span>
                 <span>{formatRupiah(order.service_amount)}</span>
               </div>
             ) : null}
@@ -140,10 +235,10 @@ export function ReceiptModal({ order, store, onClose }: ReceiptModalProps) {
               <span>{formatRupiah(order.total_amount)}</span>
             </div>
             <div className="flex justify-between text-[#44403C]">
+              <span>Bayar ({paymentLabel})</span>
               <span>
-                Bayar ({PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method})
+                {isUnpaidOnline ? "Menunggu Validasi" : formatRupiah(order.amount_paid)}
               </span>
-              <span>{formatRupiah(order.amount_paid)}</span>
             </div>
             {order.payment_method === "cash" ? (
               <div className="flex justify-between font-bold text-[#14532D]">
@@ -209,10 +304,55 @@ export function ReceiptModal({ order, store, onClose }: ReceiptModalProps) {
             <button
               type="button"
               onClick={() => window.print()}
-              className="min-h-11 inline-flex items-center justify-center gap-2 rounded-xl border border-[#1C1917]/20 bg-white px-3 py-2 text-xs font-bold text-[#1C1917] hover:bg-black/5"
+              className="min-h-11 inline-flex items-center justify-center gap-2 rounded-xl border border-[#1C1917]/20 bg-white px-3 py-2 text-xs font-bold text-[#1C1917] hover:bg-black/5 cursor-pointer"
             >
               <Printer size={17} weight="bold" aria-hidden="true" />
               Cetak Browser / PDF
+            </button>
+          </div>
+        </div>
+
+        {/* Export Receipt Image (PNG / WebP / Share) */}
+        <div className="no-print space-y-2 rounded-xl border border-[#14532D]/20 bg-emerald-50/55 p-3">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-[#14532D]">
+            <ImageSquare size={16} weight="duotone" aria-hidden="true" />
+            <span>Ekspor Gambar Struk (Langsung Kirim WA)</span>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              disabled={Boolean(exportingImg)}
+              onClick={() => {
+                void handleDownloadImage("png");
+              }}
+              className="min-h-10 inline-flex items-center justify-center gap-1.5 rounded-xl bg-white border border-[#14532D]/30 px-2.5 py-2 text-xs font-bold text-[#14532D] hover:bg-emerald-50 disabled:opacity-60 cursor-pointer"
+            >
+              <DownloadSimple size={15} weight="bold" aria-hidden="true" />
+              {exportingImg === "png" ? "..." : "PNG"}
+            </button>
+
+            <button
+              type="button"
+              disabled={Boolean(exportingImg)}
+              onClick={() => {
+                void handleDownloadImage("webp");
+              }}
+              className="min-h-10 inline-flex items-center justify-center gap-1.5 rounded-xl bg-white border border-[#14532D]/30 px-2.5 py-2 text-xs font-bold text-[#14532D] hover:bg-emerald-50 disabled:opacity-60 cursor-pointer"
+            >
+              <DownloadSimple size={15} weight="bold" aria-hidden="true" />
+              {exportingImg === "webp" ? "..." : "WebP"}
+            </button>
+
+            <button
+              type="button"
+              disabled={Boolean(exportingImg)}
+              onClick={() => {
+                void handleShareOrCopyImage();
+              }}
+              className="min-h-10 inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#14532D] px-2.5 py-2 text-xs font-bold text-white hover:bg-[#166534] disabled:opacity-60 cursor-pointer"
+            >
+              <ShareNetwork size={15} weight="bold" aria-hidden="true" />
+              {exportingImg === "share" ? "..." : "Kirim / Salin"}
             </button>
           </div>
         </div>

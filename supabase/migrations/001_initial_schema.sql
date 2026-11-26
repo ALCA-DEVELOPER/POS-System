@@ -201,7 +201,7 @@ CREATE TABLE IF NOT EXISTS public.customer_orders (
   total_amount NUMERIC(14,2) NOT NULL CHECK (total_amount >= 0),
   payment_method TEXT NOT NULL DEFAULT 'qris' CHECK (payment_method IN ('qris', 'transfer')),
   payment_status TEXT NOT NULL DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'rejected')),
-  fulfillment_status TEXT NOT NULL DEFAULT 'pending' CHECK (fulfillment_status IN ('pending', 'preparing', 'ready', 'completed', 'cancelled')),
+  fulfillment_status TEXT NOT NULL DEFAULT 'pending' CHECK (fulfillment_status IN ('pending', 'preparing', 'ready', 'shipping', 'completed', 'cancelled')),
   delivery_type TEXT NOT NULL DEFAULT 'pickup' CHECK (delivery_type IN ('pickup', 'delivery')),
   delivery_fee NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0),
   delivery_address TEXT NOT NULL DEFAULT '',
