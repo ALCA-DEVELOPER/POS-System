@@ -106,9 +106,9 @@ CREATE TABLE IF NOT EXISTS public.storefront_settings (
   cash_instruction TEXT NOT NULL DEFAULT 'Untuk menjaga ketersediaan stok, pemesanan onsite (bayar di tempat) langsung dikonfirmasi lewat chat WhatsApp dengan detail pesanan Anda.',
   enable_pickup BOOLEAN NOT NULL DEFAULT true,
   enable_delivery BOOLEAN NOT NULL DEFAULT true,
-  delivery_fee NUMERIC(14,2) NOT NULL DEFAULT 2000 CHECK (delivery_fee >= 0),
+  delivery_fee NUMERIC(14,2) NOT NULL DEFAULT 1500 CHECK (delivery_fee >= 0),
   pickup_info TEXT NOT NULL DEFAULT 'Ready hari Senin! Bisa ambil / COD di Telkom University Purwokerto pukul 10.00 - 16.00 WIB.',
-  delivery_info TEXT NOT NULL DEFAULT 'Diantar langsung ke area kos Purwokerto (ongkir Rp 2.000).',
+  delivery_info TEXT NOT NULL DEFAULT 'Diantar langsung ke area kos Purwokerto (ongkir Rp 1.500).',
   whatsapp_number TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -182,7 +182,7 @@ function serializeStorefrontSettings(s: StorefrontSettings): string {
     cash_instruction: s.cash_instruction,
     enable_pickup: s.enable_pickup ?? true,
     enable_delivery: s.enable_delivery ?? true,
-    delivery_fee: s.delivery_fee ?? 2000,
+    delivery_fee: s.delivery_fee ?? 1500,
     pickup_info: s.pickup_info ?? "",
     delivery_info: s.delivery_info ?? "",
     whatsapp_number: s.whatsapp_number,
@@ -259,7 +259,7 @@ export function CustomerOrdersClient({
     initialSettings.enable_delivery ?? true
   );
   const [deliveryFeeInput, setDeliveryFeeInput] = useState(
-    String(initialSettings.delivery_fee ?? 2000)
+    String(initialSettings.delivery_fee ?? 1500)
   );
   const [pickupInfo, setPickupInfo] = useState(
     initialSettings.pickup_info ??
@@ -267,7 +267,7 @@ export function CustomerOrdersClient({
   );
   const [deliveryInfo, setDeliveryInfo] = useState(
     initialSettings.delivery_info ??
-      "Diantar langsung ke area kos Purwokerto (ongkir Rp 2.000)."
+      "Diantar langsung ke area kos Purwokerto (ongkir Rp 1.500)."
   );
   const [whatsappNumber, setWhatsappNumber] = useState(initialSettings.whatsapp_number);
   const [uploadingPoster, setUploadingPoster] = useState(false);
@@ -312,14 +312,14 @@ export function CustomerOrdersClient({
     setCashInstruction(initialSettings.cash_instruction);
     setEnablePickup(initialSettings.enable_pickup ?? true);
     setEnableDelivery(initialSettings.enable_delivery ?? true);
-    setDeliveryFeeInput(String(initialSettings.delivery_fee ?? 2000));
+    setDeliveryFeeInput(String(initialSettings.delivery_fee ?? 1500));
     setPickupInfo(
       initialSettings.pickup_info ??
         "Ready hari Senin! Bisa ambil / COD di Telkom University Purwokerto pukul 10.00 - 16.00 WIB."
     );
     setDeliveryInfo(
       initialSettings.delivery_info ??
-        "Diantar langsung ke area kos Purwokerto (ongkir Rp 2.000)."
+        "Diantar langsung ke area kos Purwokerto (ongkir Rp 1.500)."
     );
     setWhatsappNumber(initialSettings.whatsapp_number);
   }, [initialSettings]);
@@ -1137,7 +1137,7 @@ export function CustomerOrdersClient({
                   type="text"
                   value={deliveryInfo}
                   onChange={(e) => setDeliveryInfo(e.target.value)}
-                  placeholder="Contoh: Diantar langsung ke area kos Purwokerto (ongkir Rp 2.000)."
+                  placeholder="Contoh: Diantar langsung ke area kos Purwokerto (ongkir Rp 1.500)."
                   className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917]"
                 />
               </div>

@@ -109,7 +109,7 @@ export async function POST(request: Request) {
     const unitPrice = Number(storefront.product.price);
     const deliveryFee =
       delivery_type === "delivery"
-        ? Math.max(0, Number(storefront.settings.delivery_fee ?? 2000))
+        ? Math.max(0, Number(storefront.settings.delivery_fee ?? 1500))
         : 0;
     const cleanAddress = delivery_type === "delivery" ? delivery_address.trim() : "";
     const totalAmount = unitPrice * quantity + deliveryFee;

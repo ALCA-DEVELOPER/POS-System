@@ -32,11 +32,11 @@ export function buildDefaultStorefrontSettings(
       "Untuk menjaga ketersediaan stok, pemesanan onsite (bayar di tempat) langsung dikonfirmasi lewat chat WhatsApp dengan detail pesanan Anda.",
     enable_pickup: true,
     enable_delivery: true,
-    delivery_fee: 2000,
+    delivery_fee: 1500,
     pickup_info:
       "Ready hari Senin! Bisa ambil / COD di Telkom University Purwokerto pukul 10.00 - 16.00 WIB.",
     delivery_info:
-      "Diantar langsung ke area kos Purwokerto (ongkir Rp 2.000).",
+      "Diantar langsung ke area kos Purwokerto (ongkir Rp 1.500).",
     whatsapp_number: "",
   };
 }

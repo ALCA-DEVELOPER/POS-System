@@ -235,9 +235,9 @@ CREATE TABLE IF NOT EXISTS public.storefront_settings (
   cash_instruction TEXT NOT NULL DEFAULT 'Untuk menjaga ketersediaan stok, pemesanan onsite (bayar di tempat) langsung dikonfirmasi lewat chat WhatsApp dengan detail pesanan Anda.',
   enable_pickup BOOLEAN NOT NULL DEFAULT true,
   enable_delivery BOOLEAN NOT NULL DEFAULT true,
-  delivery_fee NUMERIC(14,2) NOT NULL DEFAULT 2000 CHECK (delivery_fee >= 0),
+  delivery_fee NUMERIC(14,2) NOT NULL DEFAULT 1500 CHECK (delivery_fee >= 0),
   pickup_info TEXT NOT NULL DEFAULT 'Ready hari Senin! Bisa ambil / COD di Telkom University Purwokerto pukul 10.00 - 16.00 WIB.',
-  delivery_info TEXT NOT NULL DEFAULT 'Diantar langsung ke area kos Purwokerto (ongkir Rp 2.000).',
+  delivery_info TEXT NOT NULL DEFAULT 'Diantar langsung ke area kos Purwokerto (ongkir Rp 1.500).',
   whatsapp_number TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

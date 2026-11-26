@@ -29,7 +29,7 @@ const updateStorefrontSchema = z.object({
   cash_instruction: z.string().trim().max(500),
   enable_pickup: z.boolean().optional().default(true),
   enable_delivery: z.boolean().optional().default(true),
-  delivery_fee: z.number().min(0).optional().default(2000),
+  delivery_fee: z.number().min(0).optional().default(1500),
   pickup_info: z
     .string()
     .trim()
@@ -43,7 +43,7 @@ const updateStorefrontSchema = z.object({
     .trim()
     .max(500)
     .optional()
-    .default("Diantar langsung ke area kos Purwokerto (ongkir Rp 2.000)."),
+    .default("Diantar langsung ke area kos Purwokerto (ongkir Rp 1.500)."),
   whatsapp_number: z.string().trim().max(30),
 });
 

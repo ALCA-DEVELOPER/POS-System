@@ -104,7 +104,7 @@ export function CustomerOrderClient({
   const onsiteEnabled = settings?.enable_cash_chat !== false;
   const pickupEnabled = settings?.enable_pickup !== false;
   const deliveryEnabled = settings?.enable_delivery !== false;
-  const configuredDeliveryFee = Math.max(0, Number(settings?.delivery_fee ?? 2000));
+  const configuredDeliveryFee = Math.max(0, Number(settings?.delivery_fee ?? 1500));
 
   const [trackedOrder, setTrackedOrder] = useState<TrackedOrderView | null>(
     initialTrackedOrder
