@@ -137,7 +137,7 @@ export async function POST(request: Request) {
       totalAmount,
       paymentMethod: payment_method,
       paymentStatus: "pending",
-      fulfillmentStatus: "pending",
+      fulfillmentStatus: payment_method === "cash" ? "preparing" : "pending",
       deliveryType: delivery_type,
       deliveryFee,
       deliveryAddress: cleanAddress,

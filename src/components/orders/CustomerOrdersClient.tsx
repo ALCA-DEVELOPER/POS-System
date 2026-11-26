@@ -484,7 +484,7 @@ export function CustomerOrdersClient({
       active++;
       const fStatus = resolveCustomerOrderFulfillmentStatus(o);
       if (o.payment_status === "pending") unpaid++;
-      if (o.payment_status === "paid" && fStatus === "preparing") preparing++;
+      if (fStatus === "preparing") preparing++;
       if (fStatus === "ready" || fStatus === "shipping") ready++;
     }
     return { unpaid, preparing, ready, active };

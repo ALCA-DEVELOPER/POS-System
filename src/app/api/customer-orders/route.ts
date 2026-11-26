@@ -119,7 +119,8 @@ export async function POST(request: Request) {
         totalAmount,
         paymentMethod: payment_method,
         paymentStatus: mark_as_paid ? "paid" : "pending",
-        fulfillmentStatus: mark_as_paid ? "preparing" : "pending",
+        fulfillmentStatus:
+          mark_as_paid || payment_method === "cash" ? "preparing" : "pending",
         deliveryType: delivery_type,
         deliveryFee,
         deliveryAddress: cleanAddress,
