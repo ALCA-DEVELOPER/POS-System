@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { requireTeamAccess } from "@/lib/server/api-auth";
 import { createPosOrderViaAdmin } from "@/lib/server/order-ledger";
 
 const createPosOrderSchema = z.object({
@@ -28,24 +27,10 @@ const createPosOrderSchema = z.object({
  * sehingga tidak bentrok ketika ada riwayat transaksi yang sebelumnya dihapus.
  */
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const auth = await requireTeamAccess("Akses kasir ditolak");
+  if (auth.error) return auth.error;
 
-  if (!user) {
-    return NextResponse.json({ error: "Autentikasi diperlukan" }, { status: 401 });
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, business_id, role, is_active")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (!profile || !["owner", "cashier"].includes(profile.role) || !profile.is_active) {
-    return NextResponse.json({ error: "Akses kasir ditolak" }, { status: 403 });
-  }
+  const { profile, admin } = auth;
 
   try {
     const body = await request.json().catch(() => ({}));
@@ -55,7 +40,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: msg }, { status: 400 });
     }
 
-    const admin = createAdminClient();
     const order = await createPosOrderViaAdmin(admin, {
       businessId: profile.business_id,
       actorId: profile.id,

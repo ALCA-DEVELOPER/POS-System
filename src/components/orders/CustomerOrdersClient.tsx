@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent 
 import { useRouter } from "next/navigation";
 import {
   ArrowSquareOut,
+  ArrowsClockwise,
   Check,
   CheckCircle,
   Copy,
@@ -13,13 +14,16 @@ import {
   FloppyDisk,
   ImageSquare,
   MapPin,
+  Minus,
   Package,
+  Plus,
   Receipt,
   ShoppingBag,
   SlidersHorizontal,
   Trash,
   Truck,
   UploadSimple,
+  UserPlus,
   WhatsappLogo,
   XCircle,
 } from "@phosphor-icons/react";
@@ -229,6 +233,30 @@ export function CustomerOrdersClient({
   const [receiptOrder, setReceiptOrder] = useState<CustomerOrder | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CustomerOrder | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const activeProducts = useMemo(() => {
+    const active = products.filter((p) => p.is_active);
+    return active.length > 0 ? active : products;
+  }, [products]);
+  const defaultManualProductId = useMemo(
+    () => initialSettings.featured_product_id || activeProducts[0]?.id || "",
+    [initialSettings.featured_product_id, activeProducts]
+  );
+
+  // Manual Customer Order Modal (for private chat / DM / WA buyers)
+  const [manualModalOpen, setManualModalOpen] = useState(false);
+  const [manualName, setManualName] = useState("");
+  const [manualPhone, setManualPhone] = useState("");
+  const [manualProductId, setManualProductId] = useState(defaultManualProductId);
+  const [manualQty, setManualQty] = useState(1);
+  const [manualDeliveryType, setManualDeliveryType] = useState<"pickup" | "delivery">("pickup");
+  const [manualDeliveryAddress, setManualDeliveryAddress] = useState("");
+  const [manualPaymentMethod, setManualPaymentMethod] = useState<"qris" | "transfer" | "cash">("qris");
+  const [manualMarkPaid, setManualMarkPaid] = useState(true);
+  const [manualNotes, setManualNotes] = useState("");
+  const [submittingManual, setSubmittingManual] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
+  const [syncingPos, setSyncingPos] = useState(false);
 
   // Storefront Settings Form State (Owner)
   const [isOpen, setIsOpen] = useState(initialSettings.is_open);
@@ -581,6 +609,122 @@ export function CustomerOrdersClient({
     }
   };
 
+  const selectedManualProduct = useMemo(
+    () => activeProducts.find((p) => p.id === manualProductId) ?? activeProducts[0] ?? null,
+    [activeProducts, manualProductId]
+  );
+  const manualUnitPrice = selectedManualProduct ? Number(selectedManualProduct.price) : 0;
+  const manualDeliveryFee =
+    manualDeliveryType === "delivery"
+      ? Math.max(0, Number(deliveryFeeInput) || 1500)
+      : 0;
+  const manualTotalAmount = manualUnitPrice * manualQty + manualDeliveryFee;
+
+  const openManualOrderModal = () => {
+    setManualName("");
+    setManualPhone("");
+    setManualProductId(defaultManualProductId);
+    setManualQty(1);
+    setManualDeliveryType("pickup");
+    setManualDeliveryAddress("");
+    setManualPaymentMethod("qris");
+    setManualMarkPaid(true);
+    setManualNotes("");
+    setManualError(null);
+    setManualModalOpen(true);
+  };
+
+  const handleSubmitManualOrder = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selectedManualProduct) {
+      setManualError("Tambahkan minimal 1 menu aktif terlebih dahulu.");
+      return;
+    }
+    if (manualName.trim().length < 2) {
+      setManualError("Nama pembeli minimal 2 karakter.");
+      return;
+    }
+    if (manualDeliveryType === "delivery" && manualDeliveryAddress.trim().length < 5) {
+      setManualError("Mohon isi alamat kos lengkap untuk pengantaran.");
+      return;
+    }
+
+    setManualError(null);
+    setSubmittingManual(true);
+    try {
+      const res = await fetch("/api/customer-orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customer_name: manualName.trim(),
+          customer_phone: manualPhone.trim(),
+          product_id: selectedManualProduct.id,
+          quantity: manualQty,
+          payment_method: manualPaymentMethod,
+          mark_as_paid: manualMarkPaid,
+          delivery_type: manualDeliveryType,
+          delivery_address:
+            manualDeliveryType === "delivery" ? manualDeliveryAddress.trim() : "",
+          notes: manualNotes.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.order) {
+        setManualError(json?.error ?? "Gagal mencatat pesanan manual.");
+        return;
+      }
+
+      const created = json.order as CustomerOrder;
+      setOrders((prev) => [created, ...prev.filter((o) => o.id !== created.id)]);
+      setManualModalOpen(false);
+      setActiveSection("orders");
+      setFilter("active");
+      setErrorMsg(null);
+      setSuccessMsg(
+        manualMarkPaid
+          ? `Pesanan ${created.order_number} (${created.customer_name}) dicatat lunas, masuk omzet kasir & stok terpotong.`
+          : `Pesanan ${created.order_number} (${created.customer_name}) ditambahkan ke antrean pesanan.`
+      );
+      void broadcastBusinessUpdate(businessId, "customer_orders");
+      if (manualMarkPaid) {
+        void broadcastBusinessUpdate(businessId, "orders");
+      }
+      router.refresh();
+    } catch {
+      setManualError("Gangguan jaringan saat menyimpan pesanan.");
+    } finally {
+      setSubmittingManual(false);
+    }
+  };
+
+  const handleSyncFromPos = async () => {
+    setSyncingPos(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const res = await fetch("/api/customer-orders/sync-pos", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) {
+        setErrorMsg(json?.error ?? "Gagal menyinkronkan dari Riwayat Kasir.");
+        return;
+      }
+      const syncedCount = Number(json?.syncedCount ?? 0);
+      setSuccessMsg(
+        syncedCount > 0
+          ? `${syncedCount} transaksi dari Riwayat Kasir berhasil dimasukkan ke Pesanan Pembeli.`
+          : "Semua transaksi di Riwayat Kasir sudah masuk ke Pesanan Pembeli."
+      );
+      if (syncedCount > 0) {
+        void broadcastBusinessUpdate(businessId, "customer_orders");
+        router.refresh();
+      }
+    } catch {
+      setErrorMsg("Gangguan jaringan saat menyinkronkan riwayat kasir.");
+    } finally {
+      setSyncingPos(false);
+    }
+  };
+
   const buildCustomerWaLink = (order: CustomerOrder) => {
     const wa = normalizeWhatsAppPhone(order.customer_phone);
     if (!wa) return null;
@@ -718,6 +862,29 @@ export function CustomerOrdersClient({
             Bagikan tautan <code className="rounded bg-black/8 px-1.5 py-0.5 font-semibold">/pesan</code> ke bio Instagram atau WhatsApp pelanggan untuk pesan langsung via QRIS.
           </p>
           <div className="flex flex-wrap gap-2 pt-1.5">
+            <button
+              type="button"
+              onClick={openManualOrderModal}
+              disabled={activeProducts.length === 0}
+              className="min-h-10 inline-flex items-center gap-1.5 rounded-xl bg-[#B43D0A] px-3.5 py-1.5 text-xs font-bold text-white hover:bg-[#9A3412] disabled:opacity-50 cursor-pointer"
+            >
+              <UserPlus size={15} weight="bold" aria-hidden="true" />
+              <span>Tambah Pesanan (Chat / Manual)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSyncFromPos()}
+              disabled={syncingPos}
+              className="min-h-10 inline-flex items-center gap-1.5 rounded-xl border border-[#1C1917]/20 bg-white px-3.5 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-black/5 disabled:opacity-50 cursor-pointer"
+            >
+              <ArrowsClockwise
+                size={15}
+                weight="bold"
+                className={syncingPos ? "animate-spin" : ""}
+                aria-hidden="true"
+              />
+              <span>{syncingPos ? "Menyinkronkan..." : "Tarik dari Riwayat Kasir"}</span>
+            </button>
             <button
               type="button"
               onClick={handleCopyStoreLink}
@@ -1359,10 +1526,12 @@ export function CustomerOrdersClient({
                     </div>
 
                     <p className="text-sm font-bold text-[#1C1917]">
-                      {order.customer_name}{" "}
-                      <span className="font-semibold text-[#44403C] tabular-nums">
-                        ({order.customer_phone})
-                      </span>
+                      {order.customer_name}
+                      {order.customer_phone.trim() ? (
+                        <span className="ml-1 font-semibold text-[#44403C] tabular-nums">
+                          ({order.customer_phone})
+                        </span>
+                      ) : null}
                     </p>
 
                     <p className="text-xs sm:text-sm text-[#1C1917]">
@@ -1601,6 +1770,247 @@ export function CustomerOrdersClient({
         store={storeConfig}
         onClose={() => setReceiptOrder(null)}
       />
+
+      {/* Manual Customer Order Modal */}
+      <Modal
+        open={manualModalOpen}
+        onClose={() => setManualModalOpen(false)}
+        title="Tambah Pesanan Pembeli (Chat / Manual)"
+        description="Catat pembeli yang memesan lewat chat pribadi tanpa mengisi link /pesan agar tetap masuk antrean dan pembukuan."
+        maxWidthClass="max-w-lg"
+      >
+        <form onSubmit={handleSubmitManualOrder} className="space-y-4">
+          {manualError ? <ErrorState message={manualError} /> : null}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label htmlFor="manualBuyerName" className="block text-xs font-semibold text-[#1C1917]">
+                Nama Pembeli
+              </label>
+              <input
+                id="manualBuyerName"
+                type="text"
+                required
+                value={manualName}
+                onChange={(e) => setManualName(e.target.value)}
+                placeholder="Contoh: Nisa / Budi"
+                className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3 text-sm text-[#1C1917]"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="manualBuyerPhone" className="block text-xs font-semibold text-[#1C1917]">
+                No. HP / WhatsApp (Opsional)
+              </label>
+              <input
+                id="manualBuyerPhone"
+                type="tel"
+                value={manualPhone}
+                onChange={(e) => setManualPhone(e.target.value)}
+                placeholder="Kosongkan jika tidak ada"
+                className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3 text-sm text-[#1C1917] tabular-nums"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+            <div className="sm:col-span-8 space-y-1">
+              <label htmlFor="manualProduct" className="block text-xs font-semibold text-[#1C1917]">
+                Pilih Menu
+              </label>
+              <select
+                id="manualProduct"
+                value={manualProductId}
+                onChange={(e) => setManualProductId(e.target.value)}
+                className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3 text-sm text-[#1C1917]"
+              >
+                {activeProducts.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({formatRupiah(p.price)})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="sm:col-span-4 space-y-1">
+              <span className="block text-xs font-semibold text-[#1C1917]">Jumlah</span>
+              <div className="flex items-center justify-between rounded-xl border border-[#1C1917]/20 bg-white p-1">
+                <button
+                  type="button"
+                  onClick={() => setManualQty((q) => Math.max(1, q - 1))}
+                  aria-label="Kurangi jumlah pesanan"
+                  className="w-9 h-9 rounded-lg hover:bg-black/5 inline-flex items-center justify-center text-[#1C1917] cursor-pointer"
+                >
+                  <Minus size={16} weight="bold" aria-hidden="true" />
+                </button>
+                <span className="text-sm font-extrabold text-[#1C1917] tabular-nums">
+                  {manualQty}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setManualQty((q) => Math.min(500, q + 1))}
+                  aria-label="Tambah jumlah pesanan"
+                  className="w-9 h-9 rounded-lg bg-[#14532D] text-white inline-flex items-center justify-center cursor-pointer"
+                >
+                  <Plus size={16} weight="bold" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <span className="block text-xs font-semibold text-[#1C1917]">
+              Pengambilan / Pengantaran
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setManualDeliveryType("pickup")}
+                className={`min-h-11 rounded-xl border px-3 py-2 text-xs font-bold transition-colors cursor-pointer ${
+                  manualDeliveryType === "pickup"
+                    ? "border-[#14532D] bg-[#14532D] text-white"
+                    : "border-[#1C1917]/20 bg-white text-[#1C1917]"
+                }`}
+              >
+                Ambil / COD (Gratis)
+              </button>
+              <button
+                type="button"
+                onClick={() => setManualDeliveryType("delivery")}
+                className={`min-h-11 rounded-xl border px-3 py-2 text-xs font-bold transition-colors cursor-pointer ${
+                  manualDeliveryType === "delivery"
+                    ? "border-[#B43D0A] bg-[#B43D0A] text-white"
+                    : "border-[#1C1917]/20 bg-white text-[#1C1917]"
+                }`}
+              >
+                Diantar ke Kos (+{formatRupiah(Number(deliveryFeeInput) || 1500)})
+              </button>
+            </div>
+
+            {manualDeliveryType === "delivery" ? (
+              <div className="pt-1 space-y-1">
+                <label htmlFor="manualDeliveryAddress" className="block text-xs font-semibold text-[#1C1917]">
+                  Alamat Kos / Lokasi Pengantaran
+                </label>
+                <textarea
+                  id="manualDeliveryAddress"
+                  rows={2}
+                  required
+                  value={manualDeliveryAddress}
+                  onChange={(e) => setManualDeliveryAddress(e.target.value)}
+                  placeholder="Contoh: Kos Putri Melati Kamar 4, Jl. DI Panjaitan"
+                  className="w-full rounded-xl border border-[#1C1917]/20 bg-white px-3 py-2 text-sm text-[#1C1917]"
+                />
+              </div>
+            ) : null}
+          </div>
+
+          <div className="space-y-1.5">
+            <span className="block text-xs font-semibold text-[#1C1917]">Metode Pembayaran</span>
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  { id: "qris", label: "QRIS" },
+                  { id: "transfer", label: "Transfer" },
+                  { id: "cash", label: "Onsite / Tunai" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    setManualPaymentMethod(opt.id);
+                    if (opt.id === "cash") {
+                      setManualMarkPaid(false);
+                    }
+                  }}
+                  className={`min-h-10 rounded-xl border px-2.5 text-xs font-bold transition-colors cursor-pointer ${
+                    manualPaymentMethod === opt.id
+                      ? "border-[#14532D] bg-[#14532D] text-white"
+                      : "border-[#1C1917]/20 bg-white text-[#1C1917]"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <span className="block text-xs font-semibold text-[#1C1917]">Status Pembayaran</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setManualMarkPaid(true)}
+                className={`min-h-12 rounded-xl border px-3 py-2 text-left transition-colors cursor-pointer ${
+                  manualMarkPaid
+                    ? "border-[#14532D] bg-emerald-50 text-[#14532D]"
+                    : "border-[#1C1917]/20 bg-white text-[#1C1917]"
+                }`}
+              >
+                <span className="block text-xs font-bold">Sudah Bayar (Lunas)</span>
+                <span className="block text-[11px] opacity-85">
+                  Otomatis masuk omzet &amp; potong stok
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setManualMarkPaid(false)}
+                className={`min-h-12 rounded-xl border px-3 py-2 text-left transition-colors cursor-pointer ${
+                  !manualMarkPaid
+                    ? "border-[#B43D0A] bg-amber-50 text-[#92400E]"
+                    : "border-[#1C1917]/20 bg-white text-[#1C1917]"
+                }`}
+              >
+                <span className="block text-xs font-bold">Belum Bayar / Bayar Nanti</span>
+                <span className="block text-[11px] opacity-85">
+                  Masuk antrean bayar / COD
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label htmlFor="manualNotes" className="block text-xs font-semibold text-[#1C1917]">
+              Catatan (Opsional)
+            </label>
+            <input
+              id="manualNotes"
+              type="text"
+              value={manualNotes}
+              onChange={(e) => setManualNotes(e.target.value)}
+              placeholder="Misal: Pesan lewat WA pribadi / IG DM"
+              className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3 text-sm text-[#1C1917]"
+            />
+          </div>
+
+          <div className="rounded-xl bg-[#14532D]/8 border border-[#14532D]/20 px-3.5 py-2.5 flex items-center justify-between">
+            <span className="text-xs font-semibold text-[#1C1917]">Total Tagihan</span>
+            <span className="text-lg font-extrabold text-[#14532D] tabular-nums">
+              {formatRupiah(manualTotalAmount)}
+            </span>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setManualModalOpen(false)}
+              className="min-h-11 rounded-xl border border-[#1C1917]/15 px-4 text-sm font-semibold text-[#1C1917] cursor-pointer"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={submittingManual}
+              className="min-h-11 rounded-xl bg-[#14532D] px-5 text-sm font-extrabold text-white hover:bg-[#166534] disabled:opacity-60 cursor-pointer"
+            >
+              {submittingManual
+                ? "Menyimpan..."
+                : `Simpan Pesanan (${formatRupiah(manualTotalAmount)})`}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Delete Confirm Modal */}
       <Modal

@@ -4,10 +4,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { toJakartaDateKey, isMissingTableError } from "@/lib/analytics";
 import { getPublicStorefrontData } from "@/lib/server/storefront";
 import {
-  buildFallbackOrderMetaNotes,
   resolveCustomerOrderDelivery,
   resolveCustomerOrderPaymentMethod,
 } from "@/lib/customer-order-payment";
+import { insertCustomerOrderWithFallback } from "@/lib/server/order-ledger";
 
 const createPublicOrderSchema = z.object({
   customer_name: z.string().trim().min(2, "Nama minimal 2 karakter").max(100),
@@ -125,85 +125,24 @@ export async function POST(request: Request) {
     const orderNumber = `WEB-${todayCompact}-${suffix}`;
 
     const admin = createAdminClient();
-    let { data: created, error } = await admin
-      .from("customer_orders")
-      .insert({
-        business_id: storefront.businessId,
-        order_number: orderNumber,
-        customer_name,
-        customer_phone,
-        product_id: storefront.product.id,
-        product_name: storefront.product.name,
-        quantity,
-        unit_price: unitPrice,
-        total_amount: totalAmount,
-        payment_method,
-        payment_status: "pending",
-        fulfillment_status: "pending",
-        delivery_type,
-        delivery_fee: deliveryFee,
-        delivery_address: cleanAddress,
-        notes,
-      })
-      .select("*")
-      .single();
-
-    if (error && !isMissingTableError(error, "customer_orders")) {
-      const code = (error as { code?: string }).code ?? "";
-      const isSchemaMismatch =
-        code === "23514" ||
-        code === "42703" ||
-        code === "PGRST204" ||
-        error.message.includes("customer_orders_payment_method_check") ||
-        error.message.includes("delivery_type") ||
-        error.message.includes("delivery_fee") ||
-        error.message.includes("delivery_address");
-
-      if (isSchemaMismatch) {
-        const isMissingDeliveryCols =
-          code === "42703" ||
-          code === "PGRST204" ||
-          error.message.includes("delivery_type") ||
-          error.message.includes("delivery_fee") ||
-          error.message.includes("delivery_address");
-
-        const fallbackPayload: Record<string, unknown> = {
-          business_id: storefront.businessId,
-          order_number: orderNumber,
-          customer_name,
-          customer_phone,
-          product_id: storefront.product.id,
-          product_name: storefront.product.name,
-          quantity,
-          unit_price: unitPrice,
-          total_amount: totalAmount,
-          payment_method: "qris",
-          payment_status: "pending",
-          fulfillment_status: "pending",
-          notes: buildFallbackOrderMetaNotes({
-            rawNotes: notes,
-            paymentMethod: payment_method,
-            deliveryType: delivery_type,
-            deliveryFee,
-            deliveryAddress: cleanAddress,
-          }),
-        };
-
-        if (!isMissingDeliveryCols) {
-          fallbackPayload.delivery_type = delivery_type;
-          fallbackPayload.delivery_fee = deliveryFee;
-          fallbackPayload.delivery_address = cleanAddress;
-        }
-
-        const retry = await admin
-          .from("customer_orders")
-          .insert(fallbackPayload)
-          .select("*")
-          .single();
-        created = retry.data;
-        error = retry.error;
-      }
-    }
+    const { data: created, error } = await insertCustomerOrderWithFallback(admin, {
+      businessId: storefront.businessId,
+      orderNumber,
+      customerName: customer_name,
+      customerPhone: customer_phone,
+      productId: storefront.product.id,
+      productName: storefront.product.name,
+      quantity,
+      unitPrice,
+      totalAmount,
+      paymentMethod: payment_method,
+      paymentStatus: "pending",
+      fulfillmentStatus: "pending",
+      deliveryType: delivery_type,
+      deliveryFee,
+      deliveryAddress: cleanAddress,
+      notes,
+    });
 
     if (error || !created) {
       if (isMissingTableError(error, "customer_orders")) {

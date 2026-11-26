@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireTeamAccess } from "@/lib/server/api-auth";
 import {
   recordValidatedCustomerOrderSale,
   rollbackOrderAndRestoreStock,
@@ -23,34 +23,6 @@ const patchCustomerOrderSchema = z.object({
     "reject",
   ]),
 });
-
-async function requireTeamAccess() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { error: NextResponse.json({ error: "Autentikasi diperlukan" }, { status: 401 }) };
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, business_id, role, is_active")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (!profile || !["owner", "cashier"].includes(profile.role) || !profile.is_active) {
-    return {
-      error: NextResponse.json(
-        { error: "Hanya owner atau kasir yang dapat memvalidasi pesanan" },
-        { status: 403 }
-      ),
-    };
-  }
-
-  return { profile, admin: createAdminClient() };
-}
 
 async function notifyRealtime(
   admin: ReturnType<typeof createAdminClient>,

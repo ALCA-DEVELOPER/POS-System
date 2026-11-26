@@ -1,6 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { toJakartaDateKey } from "@/lib/analytics";
-import type { OrderType, PaymentMethod } from "@/types/database";
+import { isMissingTableError, toJakartaDateKey } from "@/lib/analytics";
+import {
+  buildFallbackOrderMetaNotes,
+  type CustomerOrderDeliveryMethod,
+  type CustomerOrderDirectMethod,
+} from "@/lib/customer-order-payment";
+import type { CustomerOrder, OrderType, PaymentMethod } from "@/types/database";
 
 interface RecipeIngredientRow {
   ingredient_id: string;
@@ -597,4 +602,257 @@ export async function recordValidatedCustomerOrderSale(
   });
 
   return createdOrder.id;
+}
+
+/**
+ * Menyisipkan baris customer_orders secara aman termasuk fallback skema lama
+ * (jika check constraint `'cash'` / `'transfer'` atau kolom pengantaran belum ada).
+ */
+export async function insertCustomerOrderWithFallback(
+  admin: SupabaseClient,
+  params: {
+    businessId: string;
+    orderNumber: string;
+    customerName: string;
+    customerPhone: string;
+    productId: string;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    totalAmount: number;
+    paymentMethod: CustomerOrderDirectMethod;
+    paymentStatus?: "pending" | "paid" | "rejected";
+    fulfillmentStatus?: "pending" | "preparing" | "ready" | "shipping" | "completed" | "cancelled";
+    deliveryType: CustomerOrderDeliveryMethod;
+    deliveryFee: number;
+    deliveryAddress: string;
+    notes: string;
+    linkedOrderId?: string | null;
+    paidVerifiedAt?: string | null;
+    createdAt?: string | null;
+  }
+): Promise<{ data: CustomerOrder | null; error: { code?: string; message: string } | null }> {
+  const {
+    businessId,
+    orderNumber,
+    customerName,
+    customerPhone,
+    productId,
+    productName,
+    quantity,
+    unitPrice,
+    totalAmount,
+    paymentMethod,
+    paymentStatus = "pending",
+    fulfillmentStatus = "pending",
+    deliveryType,
+    deliveryFee,
+    deliveryAddress,
+    notes,
+    linkedOrderId = null,
+    paidVerifiedAt = null,
+    createdAt = null,
+  } = params;
+
+  const basePayload: Record<string, unknown> = {
+    business_id: businessId,
+    order_number: orderNumber,
+    customer_name: customerName,
+    customer_phone: customerPhone,
+    product_id: productId,
+    product_name: productName,
+    quantity,
+    unit_price: unitPrice,
+    total_amount: totalAmount,
+    payment_method: paymentMethod,
+    payment_status: paymentStatus,
+    fulfillment_status: fulfillmentStatus,
+    delivery_type: deliveryType,
+    delivery_fee: deliveryFee,
+    delivery_address: deliveryAddress,
+    notes,
+    ...(linkedOrderId ? { linked_order_id: linkedOrderId } : {}),
+    ...(paidVerifiedAt ? { paid_verified_at: paidVerifiedAt } : {}),
+    ...(createdAt ? { created_at: createdAt } : {}),
+  };
+
+  const first = await admin
+    .from("customer_orders")
+    .insert(basePayload)
+    .select("*")
+    .single();
+
+  if (!first.error && first.data) {
+    return { data: first.data as CustomerOrder, error: null };
+  }
+
+  if (first.error && !isMissingTableError(first.error, "customer_orders")) {
+    const code = (first.error as { code?: string }).code ?? "";
+    const msg = first.error.message ?? "";
+    const isSchemaMismatch =
+      code === "23514" ||
+      code === "42703" ||
+      code === "PGRST204" ||
+      msg.includes("customer_orders_payment_method_check") ||
+      msg.includes("delivery_type") ||
+      msg.includes("delivery_fee") ||
+      msg.includes("delivery_address");
+
+    if (isSchemaMismatch) {
+      const isMissingDeliveryCols =
+        code === "42703" ||
+        code === "PGRST204" ||
+        msg.includes("delivery_type") ||
+        msg.includes("delivery_fee") ||
+        msg.includes("delivery_address");
+
+      const fallbackPayload: Record<string, unknown> = {
+        business_id: businessId,
+        order_number: orderNumber,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        product_id: productId,
+        product_name: productName,
+        quantity,
+        unit_price: unitPrice,
+        total_amount: totalAmount,
+        payment_method: "qris",
+        payment_status: paymentStatus,
+        fulfillment_status: fulfillmentStatus,
+        notes: buildFallbackOrderMetaNotes({
+          rawNotes: notes,
+          paymentMethod,
+          deliveryType,
+          deliveryFee,
+          deliveryAddress,
+        }),
+        ...(linkedOrderId ? { linked_order_id: linkedOrderId } : {}),
+        ...(paidVerifiedAt ? { paid_verified_at: paidVerifiedAt } : {}),
+        ...(createdAt ? { created_at: createdAt } : {}),
+      };
+
+      if (!isMissingDeliveryCols) {
+        fallbackPayload.delivery_type = deliveryType;
+        fallbackPayload.delivery_fee = deliveryFee;
+        fallbackPayload.delivery_address = deliveryAddress;
+      }
+
+      const retry = await admin
+        .from("customer_orders")
+        .insert(fallbackPayload)
+        .select("*")
+        .single();
+      return {
+        data: (retry.data as CustomerOrder | null) ?? null,
+        error: retry.error as { code?: string; message: string } | null,
+      };
+    }
+  }
+
+  return {
+    data: null,
+    error: (first.error as { code?: string; message: string } | null) ?? null,
+  };
+}
+
+/**
+ * Menyinkronkan transaksi di Riwayat Kasir (`orders`) yang belum tercatat di `customer_orders`
+ * secara idempoten (berbasis `linked_order_id`) agar tidak ada pesanan terlewat atau ganda.
+ */
+export async function syncUnlinkedOrdersToCustomerOrders(
+  admin: SupabaseClient,
+  businessId: string
+): Promise<{ syncedCount: number; syncedOrderNumbers: string[] }> {
+  const [{ data: ordersRaw, error: ordersErr }, { data: coRaw, error: coErr }] =
+    await Promise.all([
+      admin
+        .from("orders")
+        .select(
+          "id, order_number, total_amount, subtotal, service_amount, payment_method, customer_phone, notes, created_at, items:order_items(product_id, product_name, quantity, unit_price)"
+        )
+        .eq("user_id", businessId)
+        .order("created_at", { ascending: true }),
+      admin
+        .from("customer_orders")
+        .select("linked_order_id, order_number")
+        .eq("business_id", businessId),
+    ]);
+
+  if (ordersErr) throw new Error(ordersErr.message);
+  if (coErr) throw new Error(coErr.message);
+
+  const linkedOrderIds = new Set(
+    (coRaw ?? []).map((r) => r.linked_order_id as string | null).filter(Boolean)
+  );
+  const existingOrderNumbers = new Set(
+    (coRaw ?? []).map((r) => String(r.order_number ?? ""))
+  );
+
+  const syncedOrderNumbers: string[] = [];
+
+  for (const row of ordersRaw ?? []) {
+    const orderId = row.id as string;
+    const orderNumber = String(row.order_number ?? "");
+    if (linkedOrderIds.has(orderId) || existingOrderNumbers.has(orderNumber)) {
+      continue;
+    }
+
+    const items = (row.items ?? []) as Array<{
+      product_id: string | null;
+      product_name: string;
+      quantity: number;
+      unit_price: number;
+    }>;
+    const primaryItem = items[0];
+    if (!primaryItem || !primaryItem.product_id) {
+      continue;
+    }
+
+    const extraSummary =
+      items.length > 1
+        ? `Tambahan menu: ${items
+            .slice(1)
+            .map((it) => `${it.quantity}x ${it.product_name}`)
+            .join(", ")}`
+        : "";
+
+    const rawMethod = String(row.payment_method ?? "cash");
+    const method: CustomerOrderDirectMethod =
+      rawMethod === "transfer" ? "transfer" : rawMethod === "qris" ? "qris" : "cash";
+
+    const cleanCustomerName =
+      String(row.notes ?? "").trim() || `Pelanggan (${orderNumber})`;
+
+    const inserted = await insertCustomerOrderWithFallback(admin, {
+      businessId,
+      orderNumber,
+      customerName: cleanCustomerName,
+      customerPhone: String(row.customer_phone ?? "").trim(),
+      productId: primaryItem.product_id,
+      productName: primaryItem.product_name,
+      quantity: Math.max(1, Number(primaryItem.quantity || 1)),
+      unitPrice: Number(primaryItem.unit_price || 0),
+      totalAmount: Number(row.total_amount || 0),
+      paymentMethod: method,
+      paymentStatus: "paid",
+      fulfillmentStatus: "preparing",
+      deliveryType: "pickup",
+      deliveryFee: 0,
+      deliveryAddress: "",
+      notes: extraSummary ? `Input Kasir (${orderNumber}) - ${extraSummary}` : `Input Kasir (${orderNumber})`,
+      linkedOrderId: orderId,
+      paidVerifiedAt: String(row.created_at),
+      createdAt: String(row.created_at),
+    });
+
+    if (inserted.error) {
+      throw new Error(inserted.error.message);
+    }
+
+    linkedOrderIds.add(orderId);
+    existingOrderNumbers.add(orderNumber);
+    syncedOrderNumbers.push(orderNumber);
+  }
+
+  return { syncedCount: syncedOrderNumbers.length, syncedOrderNumbers };
 }
