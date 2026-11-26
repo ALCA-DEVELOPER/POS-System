@@ -284,13 +284,26 @@ export function CustomerOrderClient({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [qrisFullscreen]);
 
-  const handleSubmitDirectOrder = async (e: FormEvent) => {
+  const handleSubmitOrder = async (e: FormEvent) => {
     e.preventDefault();
     if (!product) return;
 
     if (deliveryType === "delivery" && deliveryAddress.trim().length < 5) {
       setErrorMsg("Mohon isi alamat kos lengkap untuk pengantaran.");
       return;
+    }
+
+    const isOnsite = payMode === "onsite";
+    const chosenPaymentMethod = isOnsite ? "cash" : directMethod;
+
+    // Buka tab WhatsApp saat event klik agar tidak diblokir popup blocker browser,
+    // lalu arahkan setelah pesanan resmi tercatat di database toko.
+    const pendingWaTab =
+      isOnsite && storeWaNumber && typeof window !== "undefined"
+        ? window.open("", "_blank")
+        : null;
+    if (pendingWaTab) {
+      pendingWaTab.opener = null;
     }
 
     setErrorMsg(null);
@@ -304,13 +317,14 @@ export function CustomerOrderClient({
           customer_name: customerName,
           customer_phone: customerPhone,
           quantity,
-          payment_method: directMethod,
+          payment_method: chosenPaymentMethod,
           delivery_type: deliveryType,
           delivery_address: deliveryType === "delivery" ? deliveryAddress.trim() : "",
         }),
       });
       const json = await res.json();
       if (!res.ok || !json?.order) {
+        if (pendingWaTab && !pendingWaTab.closed) pendingWaTab.close();
         setErrorMsg(json?.error ?? "Gagal mengirim pesanan. Coba lagi.");
         return;
       }
@@ -322,7 +336,12 @@ export function CustomerOrderClient({
         window.localStorage.setItem(LAST_ORDER_STORAGE_KEY, created.id);
         window.history.replaceState(null, "", `/pesan?order=${created.id}`);
       }
+
+      if (isOnsite && pendingWaTab && !pendingWaTab.closed) {
+        pendingWaTab.location.href = buildOnsiteChatUrl(created.order_number);
+      }
     } catch {
+      if (pendingWaTab && !pendingWaTab.closed) pendingWaTab.close();
       setErrorMsg("Gangguan jaringan saat mengirim pesanan.");
     } finally {
       setSubmitting(false);
@@ -352,7 +371,7 @@ export function CustomerOrderClient({
     }
   };
 
-  const buildOnsiteChatUrl = () => {
+  const buildOnsiteChatUrl = (orderNumber?: string) => {
     const nama = customerName.trim() || "Pembeli";
     const hp = customerPhone.trim() ? ` (${customerPhone.trim()})` : "";
     const deliveryLine =
@@ -361,6 +380,7 @@ export function CustomerOrderClient({
         : `Pengambilan: Ambil / COD di lokasi (${settings?.pickup_info || "Telkom University Purwokerto"})`;
     const msg = [
       `Halo Kak ${storefront?.businessName || "Nummie"}, saya ${nama}${hp}.`,
+      ...(orderNumber ? [`Kode Pesanan: *${orderNumber}*`] : []),
       `Saya mau pesan Onsite:`,
       `- ${quantity}x ${product?.name || "Paket Lumpia Ubi Ungu (coklat & keju)"} (${formatRupiah(productSubtotal)})`,
       deliveryLine,
@@ -371,22 +391,31 @@ export function CustomerOrderClient({
   };
 
   const buildProofChatUrl = (order: TrackedOrderView) => {
-    const methodLabel = getCustomerPaymentMethodLabel(
-      resolveCustomerOrderPaymentMethod(order)
-    );
+    const method = resolveCustomerOrderPaymentMethod(order);
+    const methodLabel = getCustomerPaymentMethodLabel(method);
     const delivery = resolveCustomerOrderDelivery(order);
     const deliveryLine =
       delivery.delivery_type === "delivery"
         ? `Pengambilan: Diantar ke Kos (${delivery.delivery_address || "-"})`
         : `Pengambilan: Ambil / COD di lokasi`;
-    const msg = [
-      `Halo Kak ${storefront?.businessName || "Nummie"}, saya ${order.customer_name} sudah pesan via web.`,
-      `Kode Pesanan: *${order.order_number}*`,
-      `Pesanan: ${order.quantity}x ${order.product_name}`,
-      deliveryLine,
-      `Total (${methodLabel}): ${formatRupiah(order.total_amount)}`,
-      `Berikut saya konfirmasi pembayarannya ya Kak.`,
-    ].join("\n");
+    const msg =
+      method === "cash"
+        ? [
+            `Halo Kak ${storefront?.businessName || "Nummie"}, saya ${order.customer_name} sudah pesan Onsite via web.`,
+            `Kode Pesanan: *${order.order_number}*`,
+            `Pesanan: ${order.quantity}x ${order.product_name}`,
+            deliveryLine,
+            `Total (${methodLabel}): ${formatRupiah(order.total_amount)}`,
+            `Mohon konfirmasi pesanan Onsite saya ya Kak.`,
+          ].join("\n")
+        : [
+            `Halo Kak ${storefront?.businessName || "Nummie"}, saya ${order.customer_name} sudah pesan via web.`,
+            `Kode Pesanan: *${order.order_number}*`,
+            `Pesanan: ${order.quantity}x ${order.product_name}`,
+            deliveryLine,
+            `Total (${methodLabel}): ${formatRupiah(order.total_amount)}`,
+            `Berikut saya konfirmasi pembayarannya ya Kak.`,
+          ].join("\n");
     return `https://wa.me/${storeWaNumber}?text=${encodeURIComponent(msg)}`;
   };
 
@@ -588,21 +617,32 @@ export function CustomerOrderClient({
                 )}
                 <div>
                   <p className="text-sm font-bold text-[#1C1917]">
-                    2. Validasi Pembayaran{" "}
-                    {getCustomerPaymentMethodLabel(
-                      resolveCustomerOrderPaymentMethod(trackedOrder)
-                    )}
+                    {resolveCustomerOrderPaymentMethod(trackedOrder) === "cash"
+                      ? trackedOrder.payment_status === "paid"
+                        ? "2. Pembayaran Tunai Lunas (Onsite)"
+                        : trackedOrder.payment_status === "rejected"
+                          ? "2. Pesanan / Pembayaran Dibatalkan"
+                          : "2. Pembayaran Onsite (Bayar Tunai di Tempat)"
+                      : `2. Validasi Pembayaran ${getCustomerPaymentMethodLabel(
+                          resolveCustomerOrderPaymentMethod(trackedOrder)
+                        )}`}
                   </p>
                   <p className="text-xs text-[#44403C]">
-                    {trackedOrder.payment_status === "paid"
-                      ? `Pembayaran ${getCustomerPaymentMethodLabel(
-                          resolveCustomerOrderPaymentMethod(trackedOrder)
-                        )} Anda sudah dikonfirmasi oleh penjual.`
-                      : trackedOrder.payment_status === "rejected"
-                        ? "Pembayaran belum terverifikasi atau dibatalkan penjual. Silakan hubungi WhatsApp toko."
-                        : `Penjual sedang memeriksa pembayaran ${getCustomerPaymentMethodLabel(
+                    {resolveCustomerOrderPaymentMethod(trackedOrder) === "cash"
+                      ? trackedOrder.payment_status === "paid"
+                        ? "Pembayaran tunai Onsite Anda sudah diterima penjual."
+                        : trackedOrder.payment_status === "rejected"
+                          ? "Pesanan Onsite dibatalkan. Silakan hubungi WhatsApp toko bila ada kendala."
+                          : "Pesanan sudah tercatat di sistem toko. Lanjutkan konfirmasi di WhatsApp & bayar tunai saat COD atau diantar."
+                      : trackedOrder.payment_status === "paid"
+                        ? `Pembayaran ${getCustomerPaymentMethodLabel(
                             resolveCustomerOrderPaymentMethod(trackedOrder)
-                          )} Anda. Halaman ini terupdate otomatis.`}
+                          )} Anda sudah dikonfirmasi oleh penjual.`
+                        : trackedOrder.payment_status === "rejected"
+                          ? "Pembayaran belum terverifikasi atau dibatalkan penjual. Silakan hubungi WhatsApp toko."
+                          : `Penjual sedang memeriksa pembayaran ${getCustomerPaymentMethodLabel(
+                              resolveCustomerOrderPaymentMethod(trackedOrder)
+                            )} Anda. Halaman ini terupdate otomatis.`}
                   </p>
                 </div>
               </div>
@@ -654,7 +694,9 @@ export function CustomerOrderClient({
                             ? "Pesanan Anda sedang dibuat oleh tim dapur."
                             : trackedOrder.fulfillment_status === "cancelled"
                               ? "Pesanan dibatalkan."
-                              : "Menunggu konfirmasi pembayaran untuk mulai dibuat."}
+                              : resolveCustomerOrderPaymentMethod(trackedOrder) === "cash"
+                                ? "Pesanan Onsite masuk antrean toko dan akan segera disiapkan."
+                                : "Menunggu konfirmasi pembayaran untuk mulai dibuat."}
                   </p>
                 </div>
               </div>
@@ -669,7 +711,10 @@ export function CustomerOrderClient({
                   className="min-h-11 flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-[#14532D] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#166534] transition-colors"
                 >
                   <WhatsappLogo size={18} weight="bold" aria-hidden="true" />
-                  Kirim Bukti / Chat Penjual
+                  {resolveCustomerOrderPaymentMethod(trackedOrder) === "cash" &&
+                  trackedOrder.payment_status === "pending"
+                    ? "Lanjut Konfirmasi Onsite via WhatsApp"
+                    : "Kirim Bukti / Chat Penjual"}
                 </a>
               ) : null}
               <button
@@ -747,7 +792,7 @@ export function CustomerOrderClient({
                 ) : null}
               </section>
             ) : (
-              <form onSubmit={handleSubmitDirectOrder} className="space-y-5">
+              <form onSubmit={handleSubmitOrder} className="space-y-5">
                 {/* Flagship Single Product Card */}
                 <section className="glass-elevated rounded-2xl overflow-hidden">
                   <div className="grid grid-cols-1 sm:grid-cols-12">
@@ -1235,7 +1280,7 @@ export function CustomerOrderClient({
                       </p>
                       <p className="text-xs text-[#44403C] leading-relaxed">
                         {settings?.cash_instruction ||
-                          "Untuk menjaga ketersediaan stok, pemesanan onsite (bayar di tempat) langsung dikonfirmasi lewat chat WhatsApp dengan detail pesanan Anda."}
+                          "Pesanan Onsite otomatis tercatat di sistem antrean toko dan dilanjutkan ke chat WhatsApp. Pembayaran tunai dilakukan saat COD atau pesanan diantar."}
                       </p>
                       {activeDeliveryFee > 0 ? (
                         <p className="text-xs font-semibold text-[#14532D] tabular-nums">
@@ -1245,37 +1290,33 @@ export function CustomerOrderClient({
                       ) : null}
                       {deliveryType === "delivery" && deliveryAddress.trim().length < 5 ? (
                         <p className="text-xs font-medium text-[#B43D0A] bg-[#FEF3C7] rounded-xl px-3 py-2">
-                          Isi alamat kos lengkap di bagian atas terlebih dahulu sebelum lanjut ke WhatsApp.
+                          Isi alamat kos lengkap di bagian atas terlebih dahulu sebelum lanjut pesan.
                         </p>
                       ) : null}
-                      {storeWaNumber ? (
-                        <a
-                          href={buildOnsiteChatUrl()}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => {
-                            if (
-                              deliveryType === "delivery" &&
-                              deliveryAddress.trim().length < 5
-                            ) {
-                              e.preventDefault();
-                              setErrorMsg(
-                                "Mohon isi alamat kos lengkap terlebih dahulu untuk pengantaran."
-                              );
-                            } else {
-                              setErrorMsg(null);
-                            }
-                          }}
-                          className="min-h-12 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#B43D0A] px-4 py-3 text-sm font-extrabold text-white hover:bg-[#9A3412] transition-colors"
+                      {errorMsg ? (
+                        <div
+                          role="alert"
+                          className="rounded-xl border border-[#B91C1C]/30 bg-red-50 px-3.5 py-2.5 text-xs text-[#B91C1C] flex items-center gap-2"
                         >
-                          <WhatsappLogo size={20} weight="bold" aria-hidden="true" />
-                          Pesan Onsite via WhatsApp ({formatRupiah(totalAmount)})
-                        </a>
-                      ) : (
+                          <WarningCircle size={16} weight="bold" aria-hidden="true" />
+                          <span>{errorMsg}</span>
+                        </div>
+                      ) : null}
+                      <button
+                        type="submit"
+                        disabled={submitting}
+                        className="min-h-12 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#B43D0A] px-4 py-3 text-sm font-extrabold text-white hover:bg-[#9A3412] disabled:opacity-60 transition-colors cursor-pointer"
+                      >
+                        <WhatsappLogo size={20} weight="bold" aria-hidden="true" />
+                        {submitting
+                          ? "Mencatat Pesanan Onsite..."
+                          : `Pesan Onsite via WhatsApp (${formatRupiah(totalAmount)})`}
+                      </button>
+                      {!storeWaNumber ? (
                         <p className="text-xs text-[#B43D0A]">
-                          Nomor WhatsApp toko belum diatur oleh penjual.
+                          Nomor WhatsApp toko belum diatur, tetapi pesanan tetap otomatis tercatat ke antrean toko.
                         </p>
-                      )}
+                      ) : null}
                     </div>
                   ) : (
                     <p className="text-xs text-[#B43D0A]">

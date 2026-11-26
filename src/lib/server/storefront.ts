@@ -29,7 +29,7 @@ export function buildDefaultStorefrontSettings(
     transfer_instruction:
       "Transfer tepat sesuai nominal ke rekening bank di atas, lalu tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda.",
     cash_instruction:
-      "Untuk menjaga ketersediaan stok, pemesanan onsite (bayar di tempat) langsung dikonfirmasi lewat chat WhatsApp dengan detail pesanan Anda.",
+      "Pesanan Onsite otomatis tercatat di sistem antrean toko dan dilanjutkan ke chat WhatsApp. Pembayaran tunai dilakukan saat COD atau pesanan diantar.",
     enable_pickup: true,
     enable_delivery: true,
     delivery_fee: 1500,

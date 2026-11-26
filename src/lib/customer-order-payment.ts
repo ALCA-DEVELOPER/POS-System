@@ -1,6 +1,6 @@
 import type { CustomerFulfillmentStatus } from "@/types/database";
 
-export type CustomerOrderDirectMethod = "qris" | "transfer";
+export type CustomerOrderDirectMethod = "qris" | "transfer" | "cash";
 export type CustomerOrderDeliveryMethod = "pickup" | "delivery";
 
 const TRANSFER_NOTE_PREFIX = "[Transfer Bank]";
@@ -37,9 +37,12 @@ export function resolveCustomerOrderPaymentMethod(order: {
   if (order.payment_method === "transfer") {
     return "transfer";
   }
+  if (order.payment_method === "cash") {
+    return "cash";
+  }
   const meta = parseFallbackMeta(order.notes);
-  if (meta?.pm === "transfer") {
-    return "transfer";
+  if (meta?.pm === "transfer" || meta?.pm === "cash") {
+    return meta.pm;
   }
   if ((order.notes ?? "").trim().startsWith(TRANSFER_NOTE_PREFIX)) {
     return "transfer";
@@ -132,7 +135,9 @@ export function withShippingFallbackNote(
 export function getCustomerPaymentMethodLabel(
   method: CustomerOrderDirectMethod
 ): string {
-  return method === "transfer" ? "Transfer Bank" : "QRIS";
+  if (method === "transfer") return "Transfer Bank";
+  if (method === "cash") return "Onsite (Tunai)";
+  return "QRIS";
 }
 
 export function isCustomerOrderActive(order: {
@@ -155,7 +160,9 @@ export function buildFallbackOrderMetaNotes(params: {
 }): string {
   const clean = params.rawNotes.trim();
   const meta: FallbackOrderMeta = {};
-  if (params.paymentMethod === "transfer") meta.pm = "transfer";
+  if (params.paymentMethod === "transfer" || params.paymentMethod === "cash") {
+    meta.pm = params.paymentMethod;
+  }
   if (params.deliveryType === "delivery") {
     meta.dt = "delivery";
     meta.df = Math.max(0, Number(params.deliveryFee || 0));

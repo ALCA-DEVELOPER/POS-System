@@ -17,7 +17,7 @@ const createPublicOrderSchema = z.object({
     .min(8, "Nomor WhatsApp / HP minimal 8 digit")
     .max(25),
   quantity: z.number().int().min(1, "Jumlah minimal 1").max(100, "Maksimal 100 paket per order"),
-  payment_method: z.enum(["qris", "transfer"]).optional().default("qris"),
+  payment_method: z.enum(["qris", "transfer", "cash"]).optional().default("qris"),
   delivery_type: z.enum(["pickup", "delivery"]).optional().default("pickup"),
   delivery_address: z.string().trim().max(400).optional().default(""),
   notes: z.string().trim().max(300).optional().default(""),
@@ -84,6 +84,12 @@ export async function POST(request: Request) {
     if (payment_method === "transfer" && !storefront.bankAccountNumber.trim()) {
       return NextResponse.json(
         { error: "Nomor rekening transfer toko belum diatur." },
+        { status: 400 }
+      );
+    }
+    if (payment_method === "cash" && !storefront.settings.enable_cash_chat) {
+      return NextResponse.json(
+        { error: "Pemesanan Onsite sedang tidak aktif." },
         { status: 400 }
       );
     }

@@ -56,9 +56,7 @@ export function buildEscPosReceipt(
   const paymentLabel =
     PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method;
   const isUnpaidOnline =
-    order.order_type === "online" &&
-    Number(order.amount_paid) === 0 &&
-    order.payment_method !== "cash";
+    order.order_type === "online" && Number(order.amount_paid) === 0;
 
   lines.push(divider);
   lines.push(padLine("Subtotal", formatRupiah(order.subtotal), cols));
@@ -206,9 +204,7 @@ export function buildWhatsAppReceiptText(order: Order, store: StorePosConfig): s
   const paymentLabel =
     PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method;
   const isUnpaidOnline =
-    order.order_type === "online" &&
-    Number(order.amount_paid) === 0 &&
-    order.payment_method !== "cash";
+    order.order_type === "online" && Number(order.amount_paid) === 0;
 
   lines.push("------------------------");
   lines.push(`Subtotal: ${formatRupiah(order.subtotal)}`);

@@ -16,6 +16,7 @@ import {
 const patchCustomerOrderSchema = z.object({
   action: z.enum([
     "confirm_paid",
+    "confirm_paid_and_complete",
     "mark_ready",
     "mark_shipping",
     "mark_completed",
@@ -106,7 +107,7 @@ export async function PATCH(
 
     const updates: Record<string, unknown> = {};
 
-    if (action === "confirm_paid") {
+    if (action === "confirm_paid" || action === "confirm_paid_and_complete") {
       const actualPaymentMethod = resolveCustomerOrderPaymentMethod(existing);
       const delivery = resolveCustomerOrderDelivery(existing);
       if (!linkedOrderId) {
@@ -130,7 +131,17 @@ export async function PATCH(
       updates.payment_status = "paid";
       updates.paid_verified_at = existing.paid_verified_at ?? nowIso;
       updates.linked_order_id = linkedOrderId;
-      if (existing.fulfillment_status === "pending" || existing.fulfillment_status === "cancelled") {
+      if (action === "confirm_paid_and_complete") {
+        updates.fulfillment_status = "completed";
+        if (!existing.ready_at) updates.ready_at = nowIso;
+        const cleanedNotes = withShippingFallbackNote(existing.notes, false);
+        if (cleanedNotes !== existing.notes) {
+          updates.notes = cleanedNotes;
+        }
+      } else if (
+        existing.fulfillment_status === "pending" ||
+        existing.fulfillment_status === "cancelled"
+      ) {
         updates.fulfillment_status = "preparing";
       }
     } else if (action === "mark_ready") {

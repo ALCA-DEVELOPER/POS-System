@@ -84,9 +84,7 @@ export async function renderReceiptToImageBlob(
   const paymentLabel =
     PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method;
   const isUnpaidOnline =
-    order.order_type === "online" &&
-    Number(order.amount_paid) === 0 &&
-    order.payment_method !== "cash";
+    order.order_type === "online" && Number(order.amount_paid) === 0;
 
   mctx.font = `800 30px ${fontFamily}`;
   const titleLines = wrapText(mctx, storeTitle, innerWidth);

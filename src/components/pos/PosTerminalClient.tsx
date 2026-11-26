@@ -278,7 +278,7 @@ export function PosTerminalClient({
         quantity: c.quantity,
       }));
 
-      const { data, error } = await supabase.rpc("create_pos_order", {
+      const rpcPayload = {
         p_shift_id: shiftId,
         p_order_type: "dine_in",
         p_payment_method: paymentMethod,
@@ -287,13 +287,43 @@ export function PosTerminalClient({
         p_customer_phone: null,
         p_notes: customerName.trim(),
         p_items: itemsPayload,
-      });
+      };
 
-      if (error || !data) {
-        throw new Error(error?.message ?? "Gagal memproses transaksi POS.");
+      const { data, error } = await supabase.rpc("create_pos_order", rpcPayload);
+
+      let resOrder: Order | null = data ? (data as Order) : null;
+      if (error || !resOrder) {
+        const isDuplicateOrderNo =
+          Boolean(error?.message?.includes("orders_user_id_order_number_key")) ||
+          Boolean(error?.message?.includes("duplicate key"));
+
+        if (!isDuplicateOrderNo) {
+          throw new Error(error?.message ?? "Gagal memproses transaksi POS.");
+        }
+
+        const fallbackRes = await fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            shift_id: shiftId,
+            order_type: "dine_in",
+            payment_method: paymentMethod,
+            discount_amount: discountAmount,
+            amount_paid: paymentMethod === "cash" ? cashPaidNum : grandTotal,
+            customer_phone: null,
+            notes: customerName.trim(),
+            items: itemsPayload,
+          }),
+        });
+        const fallbackJson = await fallbackRes.json();
+        if (!fallbackRes.ok || !fallbackJson?.order) {
+          throw new Error(
+            fallbackJson?.error ?? error?.message ?? "Gagal memproses transaksi POS."
+          );
+        }
+        resOrder = fallbackJson.order as Order;
       }
 
-      const resOrder = data as Order;
       const hydratedOrder: Order = {
         ...resOrder,
         customer_phone: null,

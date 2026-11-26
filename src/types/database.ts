@@ -243,7 +243,7 @@ export interface CustomerOrder {
   quantity: number;
   unit_price: number;
   total_amount: number;
-  payment_method: "qris" | "transfer";
+  payment_method: "qris" | "transfer" | "cash";
   payment_status: CustomerPaymentStatus;
   fulfillment_status: CustomerFulfillmentStatus;
   delivery_type?: CustomerDeliveryType;

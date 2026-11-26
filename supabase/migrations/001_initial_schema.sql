@@ -199,7 +199,7 @@ CREATE TABLE IF NOT EXISTS public.customer_orders (
   quantity INTEGER NOT NULL CHECK (quantity > 0),
   unit_price NUMERIC(14,2) NOT NULL CHECK (unit_price >= 0),
   total_amount NUMERIC(14,2) NOT NULL CHECK (total_amount >= 0),
-  payment_method TEXT NOT NULL DEFAULT 'qris' CHECK (payment_method IN ('qris', 'transfer')),
+  payment_method TEXT NOT NULL DEFAULT 'qris' CHECK (payment_method IN ('qris', 'transfer', 'cash')),
   payment_status TEXT NOT NULL DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'rejected')),
   fulfillment_status TEXT NOT NULL DEFAULT 'pending' CHECK (fulfillment_status IN ('pending', 'preparing', 'ready', 'shipping', 'completed', 'cancelled')),
   delivery_type TEXT NOT NULL DEFAULT 'pickup' CHECK (delivery_type IN ('pickup', 'delivery')),
@@ -232,7 +232,7 @@ CREATE TABLE IF NOT EXISTS public.storefront_settings (
   enable_cash_chat BOOLEAN NOT NULL DEFAULT true,
   qris_instruction TEXT NOT NULL DEFAULT 'Setelah berhasil transfer via QRIS, tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda.',
   transfer_instruction TEXT NOT NULL DEFAULT 'Transfer tepat sesuai nominal ke rekening bank di atas, lalu tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda.',
-  cash_instruction TEXT NOT NULL DEFAULT 'Untuk menjaga ketersediaan stok, pemesanan onsite (bayar di tempat) langsung dikonfirmasi lewat chat WhatsApp dengan detail pesanan Anda.',
+  cash_instruction TEXT NOT NULL DEFAULT 'Pesanan Onsite otomatis tercatat di sistem antrean toko dan dilanjutkan ke chat WhatsApp. Pembayaran tunai dilakukan saat COD atau pesanan diantar.',
   enable_pickup BOOLEAN NOT NULL DEFAULT true,
   enable_delivery BOOLEAN NOT NULL DEFAULT true,
   delivery_fee NUMERIC(14,2) NOT NULL DEFAULT 1500 CHECK (delivery_fee >= 0),
@@ -764,7 +764,7 @@ DECLARE
   v_shift RECORD;
   v_order_id UUID := gen_random_uuid();
   v_order_number TEXT;
-  v_seq INTEGER;
+  v_seq BIGINT;
   v_today_key TEXT;
   v_subtotal NUMERIC(14,2) := 0;
   v_discount NUMERIC(14,2) := GREATEST(COALESCE(p_discount_amount, 0), 0);
@@ -820,16 +820,27 @@ BEGIN
   FROM public.profiles
   WHERE id = v_business_id;
 
-  -- Lock per business & day for clean sequential order numbers
+  -- Lock per business & day for clean sequential order numbers based on MAX suffix (deletion-safe)
   v_today_key := to_char(NOW() AT TIME ZONE 'Asia/Jakarta', 'YYYYMMDD');
   PERFORM pg_advisory_xact_lock(hashtext(v_business_id::text || '-' || v_today_key));
 
-  SELECT COUNT(*) + 1 INTO v_seq
+  SELECT COALESCE(
+    MAX((substring(order_number FROM ('^KK-' || v_today_key || '-([0-9]+)$')))::BIGINT),
+    0
+  ) + 1
+  INTO v_seq
   FROM public.orders
   WHERE user_id = v_business_id
-    AND order_number LIKE 'KK-' || v_today_key || '-%';
+    AND order_number ~ ('^KK-' || v_today_key || '-[0-9]{1,12}$');
 
-  v_order_number := 'KK-' || v_today_key || '-' || lpad(v_seq::text, 3, '0');
+  LOOP
+    v_order_number := 'KK-' || v_today_key || '-' || lpad(v_seq::text, 3, '0');
+    EXIT WHEN NOT EXISTS (
+      SELECT 1 FROM public.orders
+      WHERE user_id = v_business_id AND order_number = v_order_number
+    );
+    v_seq := v_seq + 1;
+  END LOOP;
 
   -- First pass: compute subtotal
   FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
