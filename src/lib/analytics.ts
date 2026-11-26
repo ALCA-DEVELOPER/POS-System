@@ -234,7 +234,13 @@ export function isMissingTableError(
   if (!err) return false;
   const code = err.code ?? "";
   const msg = err.message ?? "";
-  return code === "PGRST205" || code === "42P01" || msg.includes(tableName);
+  if (code === "PGRST205" || code === "42P01") return true;
+  if (code) return false;
+  return (
+    (msg.includes("Could not find the table") && msg.includes(tableName)) ||
+    msg.includes(`relation "public.${tableName}" does not exist`) ||
+    msg.includes(`relation "${tableName}" does not exist`)
+  );
 }
 
 const PACKAGING_INGREDIENT_REGEX =
