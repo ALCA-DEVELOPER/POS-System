@@ -196,11 +196,33 @@ function BusinessBrandAvatar({
   return <BrandLogo variant="mark" size={px} decorative />;
 }
 
+function OrderCountBadge({
+  count,
+  className,
+}: {
+  count: number;
+  className?: string;
+}) {
+  if (count <= 0) return null;
+  return (
+    <span
+      aria-label={`${count} pesanan aktif`}
+      className={cn(
+        "min-w-5 h-5 px-1.5 rounded-full bg-[#DC2626] text-white text-[11px] font-extrabold inline-flex items-center justify-center tabular-nums shrink-0 shadow-xs",
+        className
+      )}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
 interface AppShellProps {
   role: UserRole;
   businessName: string;
   userName: string;
   logoUrl?: string | null;
+  pendingOrdersCount?: number;
   pageTitle: string;
   headerAction?: ReactNode;
   children: ReactNode;
@@ -212,6 +234,7 @@ export function AppShell({
   businessName,
   userName,
   logoUrl,
+  pendingOrdersCount,
   pageTitle,
   headerAction,
   children,
@@ -223,6 +246,9 @@ export function AppShell({
   const [loggingOut, setLoggingOut] = useState(false);
   const [liveLogoUrl, setLiveLogoUrl] = useState<string | null>(logoUrl ?? null);
   const [liveBusinessName, setLiveBusinessName] = useState(businessName);
+  const [livePendingOrdersCount, setLivePendingOrdersCount] = useState<number>(
+    pendingOrdersCount ?? 0
+  );
 
   useEffect(() => {
     setLiveLogoUrl(logoUrl ?? null);
@@ -233,15 +259,28 @@ export function AppShell({
   }, [businessName]);
 
   useEffect(() => {
+    if (pendingOrdersCount !== undefined) {
+      setLivePendingOrdersCount(pendingOrdersCount);
+    }
+  }, [pendingOrdersCount]);
+
+  useEffect(() => {
     const onLocalSync = (event: Event) => {
       const detail = (
-        event as CustomEvent<{ logoUrl?: string | null; businessName?: string }>
+        event as CustomEvent<{
+          logoUrl?: string | null;
+          businessName?: string;
+          pendingOrdersCount?: number;
+        }>
       ).detail;
       if (detail?.logoUrl !== undefined) {
         setLiveLogoUrl(detail.logoUrl);
       }
       if (detail?.businessName !== undefined) {
         setLiveBusinessName(detail.businessName);
+      }
+      if (detail?.pendingOrdersCount !== undefined) {
+        setLivePendingOrdersCount(detail.pendingOrdersCount);
       }
     };
     window.addEventListener(BUSINESS_SYNC_DOM_EVENT, onLocalSync);
@@ -328,13 +367,15 @@ export function AppShell({
                     <ul className="space-y-1">
                       {groupItems.map((item) => {
                         const active = isRouteActive(item.href);
+                        const badgeCount =
+                          item.href === "/pesanan" ? livePendingOrdersCount : 0;
                         return (
                           <li key={item.href}>
                             <Link
                               href={item.href}
                               aria-current={active ? "page" : undefined}
                               className={cn(
-                                "min-h-11 flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors",
+                                "min-h-11 flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm transition-colors",
                                 active
                                   ? "bg-[#14532D] text-white font-semibold shadow-sm"
                                   : item.accent
@@ -342,8 +383,11 @@ export function AppShell({
                                     : "text-[#1C1917] font-medium hover:bg-black/5"
                               )}
                             >
-                              <NavIcon name={item.icon} active={active} />
-                              <span className="truncate">{item.label}</span>
+                              <span className="flex items-center gap-3 min-w-0">
+                                <NavIcon name={item.icon} active={active} />
+                                <span className="truncate">{item.label}</span>
+                              </span>
+                              <OrderCountBadge count={badgeCount} />
                             </Link>
                           </li>
                         );
@@ -391,6 +435,9 @@ export function AppShell({
               >
                 <List size={20} weight="bold" aria-hidden="true" />
                 <span>Menu</span>
+                {role !== "kitchen" ? (
+                  <OrderCountBadge count={livePendingOrdersCount} />
+                ) : null}
               </button>
               <div className="min-w-0">
                 <h1 className="text-base sm:text-lg font-bold text-[#1C1917] truncate">
@@ -430,13 +477,15 @@ export function AppShell({
         >
           {bottom.map((item) => {
             const active = isRouteActive(item.href);
+            const badgeCount =
+              item.href === "/pesanan" ? livePendingOrdersCount : 0;
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "min-h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 px-1 py-1 text-[11px] leading-tight transition-colors",
+                  "relative min-h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 px-1 py-1 text-[11px] leading-tight transition-colors",
                   active
                     ? "bg-[#14532D] text-white font-bold"
                     : item.accent
@@ -446,6 +495,10 @@ export function AppShell({
               >
                 <NavIcon name={item.icon} active={active} />
                 <span className="truncate max-w-full">{item.shortLabel}</span>
+                <OrderCountBadge
+                  count={badgeCount}
+                  className="absolute top-1 right-2 min-w-4 h-4 px-1 text-[10px]"
+                />
               </Link>
             );
           })}
@@ -506,6 +559,8 @@ export function AppShell({
                       <ul className="space-y-1">
                         {groupItems.map((item) => {
                           const active = isRouteActive(item.href);
+                          const badgeCount =
+                            item.href === "/pesanan" ? livePendingOrdersCount : 0;
                           return (
                             <li key={item.href}>
                               <Link
@@ -513,14 +568,17 @@ export function AppShell({
                                 onClick={() => setDrawerOpen(false)}
                                 aria-current={active ? "page" : undefined}
                                 className={cn(
-                                  "min-h-11 flex items-center gap-3 rounded-xl px-3 py-2 text-sm",
+                                  "min-h-11 flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm",
                                   active
                                     ? "bg-[#14532D] text-white font-semibold"
                                     : "text-[#1C1917] font-medium hover:bg-black/5"
                                 )}
                               >
-                                <NavIcon name={item.icon} active={active} />
-                                <span>{item.label}</span>
+                                <span className="flex items-center gap-3 min-w-0">
+                                  <NavIcon name={item.icon} active={active} />
+                                  <span>{item.label}</span>
+                                </span>
+                                <OrderCountBadge count={badgeCount} />
                               </Link>
                             </li>
                           );

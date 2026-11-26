@@ -47,6 +47,7 @@ export default async function StockPage() {
       businessName={session.profile.business_name}
       userName={session.profile.full_name || session.profile.owner_name}
       logoUrl={session.profile.logo_url}
+      pendingOrdersCount={session.pendingOrdersCount}
       pageTitle="Stok Bahan Baku & Kemasan"
     >
       <StockManagerClient

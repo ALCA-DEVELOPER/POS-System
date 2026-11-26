@@ -99,6 +99,17 @@ export function getCustomerPaymentMethodLabel(
   return method === "transfer" ? "Transfer Bank" : "QRIS";
 }
 
+export function isCustomerOrderActive(order: {
+  payment_status?: string | null;
+  fulfillment_status?: string | null;
+}): boolean {
+  return (
+    order.fulfillment_status !== "completed" &&
+    order.fulfillment_status !== "cancelled" &&
+    order.payment_status !== "rejected"
+  );
+}
+
 export function buildFallbackOrderMetaNotes(params: {
   rawNotes: string;
   paymentMethod?: CustomerOrderDirectMethod;

@@ -31,6 +31,7 @@ export default async function ScanReceiptPage() {
       businessName={session.profile.business_name}
       userName={session.profile.full_name || session.profile.owner_name}
       logoUrl={session.profile.logo_url}
+      pendingOrdersCount={session.pendingOrdersCount}
       pageTitle="Scan Struk Belanja"
     >
       <ScanReceiptClient

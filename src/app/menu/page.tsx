@@ -57,6 +57,7 @@ export default async function MenuPage() {
       businessName={session.profile.business_name}
       userName={session.profile.full_name || session.profile.owner_name}
       logoUrl={session.profile.logo_url}
+      pendingOrdersCount={session.pendingOrdersCount}
       pageTitle="Menu Jual & Kalkulasi HPP"
     >
       <MenuHppClient

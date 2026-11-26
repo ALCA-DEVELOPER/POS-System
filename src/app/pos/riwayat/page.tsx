@@ -73,6 +73,7 @@ export default async function PosHistoryPage() {
       businessName={storeConfig.business_name || session.profile.business_name}
       userName={session.profile.full_name || session.profile.owner_name}
       logoUrl={storeConfig.logo_url || session.profile.logo_url}
+      pendingOrdersCount={session.pendingOrdersCount}
       pageTitle="Riwayat Transaksi Kasir"
     >
       <PosHistoryClient

@@ -20,6 +20,7 @@ export interface SessionContext {
   userId: string;
   email: string;
   profile: Profile | null;
+  pendingOrdersCount: number;
   schemaMissing: boolean;
 }
 
@@ -51,6 +52,7 @@ export async function requireSession(allowedRoles?: UserRole[]): Promise<Session
         userId: user.id,
         email: user.email ?? "",
         profile: null,
+        pendingOrdersCount: 0,
         schemaMissing: true,
       };
     }
@@ -95,10 +97,27 @@ export async function requireSession(allowedRoles?: UserRole[]): Promise<Session
     redirect(getDefaultRouteForRole(role));
   }
 
+  let pendingOrdersCount = 0;
+  if (resolvedProfile && ["owner", "cashier"].includes(role)) {
+    try {
+      const admin = createAdminClient();
+      const { count } = await admin
+        .from("customer_orders")
+        .select("id", { count: "exact", head: true })
+        .eq("business_id", resolvedProfile.business_id)
+        .neq("payment_status", "rejected")
+        .in("fulfillment_status", ["pending", "preparing", "ready"]);
+      pendingOrdersCount = count ?? 0;
+    } catch {
+      pendingOrdersCount = 0;
+    }
+  }
+
   return {
     userId: user.id,
     email: user.email ?? "",
     profile: resolvedProfile,
+    pendingOrdersCount,
     schemaMissing: false,
   };
 }

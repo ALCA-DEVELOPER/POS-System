@@ -24,9 +24,10 @@ import {
 } from "@phosphor-icons/react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateId, formatRupiah, normalizeWhatsAppPhone } from "@/lib/format";
-import { broadcastBusinessUpdate } from "@/lib/realtime";
+import { broadcastBusinessUpdate, emitLocalBusinessSync } from "@/lib/realtime";
 import {
   getCustomerPaymentMethodLabel,
+  isCustomerOrderActive,
   resolveCustomerOrderDelivery,
   resolveCustomerOrderPaymentMethod,
   stripInternalPaymentTag,
@@ -441,22 +442,26 @@ export function CustomerOrdersClient({
     let unpaid = 0;
     let preparing = 0;
     let ready = 0;
+    let active = 0;
     for (const o of orders) {
+      if (!isCustomerOrderActive(o)) continue;
+      active++;
       if (o.payment_status === "pending") unpaid++;
       if (o.payment_status === "paid" && o.fulfillment_status === "preparing") preparing++;
       if (o.fulfillment_status === "ready") ready++;
     }
-    return { unpaid, preparing, ready };
+    return { unpaid, preparing, ready, active };
   }, [orders]);
+
+  useEffect(() => {
+    emitLocalBusinessSync("customer_orders", { pendingOrdersCount: counts.active });
+  }, [counts.active]);
 
   const filtered = useMemo(() => {
     return orders.filter((o) => {
-      const isDone =
-        o.fulfillment_status === "completed" ||
-        o.fulfillment_status === "cancelled" ||
-        o.payment_status === "rejected";
-      if (filter === "active") return !isDone;
-      if (filter === "done") return isDone;
+      const active = isCustomerOrderActive(o);
+      if (filter === "active") return active;
+      if (filter === "done") return !active;
       return true;
     });
   }, [orders, filter]);
@@ -503,7 +508,7 @@ export function CustomerOrdersClient({
         );
         void broadcastBusinessUpdate(updated.business_id, "orders");
       } else if (action === "mark_ready") {
-        setSuccessMsg(`Pesanan ${updated.order_number} ditandai SUDAH JADI & siap diambil.`);
+        setSuccessMsg(`Pesanan ${updated.order_number} ditandai SUDAH JADI.`);
       } else if (action === "mark_completed") {
         setSuccessMsg(`Pesanan ${updated.order_number} ditandai SELESAI.`);
       } else {
@@ -511,6 +516,7 @@ export function CustomerOrdersClient({
         void broadcastBusinessUpdate(updated.business_id, "orders");
       }
 
+      void broadcastBusinessUpdate(updated.business_id, "customer_orders");
       router.refresh();
     } catch {
       setErrorMsg("Gangguan jaringan saat memvalidasi pesanan.");
@@ -536,6 +542,7 @@ export function CustomerOrdersClient({
       setOrders((prev) => prev.filter((o) => o.id !== deleteTarget.id));
       setSuccessMsg(`Pesanan ${deleteTarget.order_number} berhasil dihapus.`);
       setDeleteTarget(null);
+      void broadcastBusinessUpdate(businessId, "customer_orders");
       router.refresh();
     } catch {
       setErrorMsg("Gangguan jaringan saat menghapus pesanan.");
@@ -685,7 +692,7 @@ export function CustomerOrdersClient({
             }`}
           >
             <ShoppingBag size={17} weight="bold" aria-hidden="true" />
-            <span>Pesanan Masuk ({orders.length})</span>
+            <span>Pesanan Masuk ({counts.active})</span>
           </button>
           <button
             type="button"

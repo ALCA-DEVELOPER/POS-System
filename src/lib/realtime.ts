@@ -24,7 +24,11 @@ export function getPublicOrderChannelName(orderId: string): string {
 
 export function emitLocalBusinessSync(
   scope: BusinessSyncScope = "all",
-  meta?: { logoUrl?: string | null; businessName?: string }
+  meta?: {
+    logoUrl?: string | null;
+    businessName?: string;
+    pendingOrdersCount?: number;
+  }
 ) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(
