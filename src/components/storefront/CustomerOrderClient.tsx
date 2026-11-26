@@ -18,6 +18,7 @@ import {
   Plus,
   QrCode,
   Storefront,
+  Truck,
   Wallet,
   WarningCircle,
   WhatsappLogo,
@@ -28,6 +29,7 @@ import { formatDateId, formatRupiah, normalizeWhatsAppPhone } from "@/lib/format
 import { getPublicOrderChannelName } from "@/lib/realtime";
 import {
   getCustomerPaymentMethodLabel,
+  resolveCustomerOrderDelivery,
   resolveCustomerOrderPaymentMethod,
 } from "@/lib/customer-order-payment";
 import type { CustomerOrder, PublicStorefrontData } from "@/types/database";
@@ -52,11 +54,43 @@ type TrackedOrderView = Pick<
   | "payment_method"
   | "payment_status"
   | "fulfillment_status"
+  | "delivery_type"
+  | "delivery_fee"
+  | "delivery_address"
   | "notes"
   | "paid_verified_at"
   | "ready_at"
   | "created_at"
 >;
+
+function PaymentAmountBreakdown({
+  title,
+  quantity,
+  productSubtotal,
+  deliveryFee,
+  totalAmount,
+}: {
+  title: string;
+  quantity: number;
+  productSubtotal: number;
+  deliveryFee: number;
+  totalAmount: number;
+}) {
+  return (
+    <div className="space-y-1 text-center">
+      <p className="text-xs font-semibold text-[#44403C]">{title}</p>
+      {deliveryFee > 0 ? (
+        <p className="text-[11px] text-[#44403C] tabular-nums">
+          Menu ({quantity}x): {formatRupiah(productSubtotal)} + Ongkir:{" "}
+          {formatRupiah(deliveryFee)}
+        </p>
+      ) : null}
+      <p className="text-2xl font-extrabold text-[#14532D] tabular-nums">
+        {formatRupiah(totalAmount)}
+      </p>
+    </div>
+  );
+}
 
 export function CustomerOrderClient({
   storefront,
@@ -68,6 +102,9 @@ export function CustomerOrderClient({
   const transferEnabled = settings?.enable_transfer !== false;
   const directEnabled = qrisEnabled || transferEnabled;
   const onsiteEnabled = settings?.enable_cash_chat !== false;
+  const pickupEnabled = settings?.enable_pickup !== false;
+  const deliveryEnabled = settings?.enable_delivery !== false;
+  const configuredDeliveryFee = Math.max(0, Number(settings?.delivery_fee ?? 2000));
 
   const [trackedOrder, setTrackedOrder] = useState<TrackedOrderView | null>(
     initialTrackedOrder
@@ -78,6 +115,10 @@ export function CustomerOrderClient({
   const [directMethod, setDirectMethod] = useState<"qris" | "transfer">(
     qrisEnabled ? "qris" : "transfer"
   );
+  const [deliveryType, setDeliveryType] = useState<"pickup" | "delivery">(
+    pickupEnabled ? "pickup" : "delivery"
+  );
+  const [deliveryAddress, setDeliveryAddress] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -87,17 +128,20 @@ export function CustomerOrderClient({
   const [copiedRek, setCopiedRek] = useState(false);
 
   const product = storefront?.product ?? null;
-  const totalAmount = useMemo(() => {
+  const productSubtotal = useMemo(() => {
     if (!product) return 0;
     return Number(product.price) * quantity;
   }, [product, quantity]);
+  const activeDeliveryFee =
+    deliveryType === "delivery" && deliveryEnabled ? configuredDeliveryFee : 0;
+  const totalAmount = productSubtotal + activeDeliveryFee;
 
   const storeWaNumber = useMemo(
     () => normalizeWhatsAppPhone(storefront?.phone ?? ""),
     [storefront?.phone]
   );
 
-  // Sinkronkan mode pembayaran bila pengaturan toko diperbarui secara real-time
+  // Sinkronkan mode pembayaran & pengiriman bila pengaturan toko diperbarui secara real-time
   useEffect(() => {
     if (!settings) return;
     if (!directEnabled && onsiteEnabled && payMode === "direct") {
@@ -111,7 +155,24 @@ export function CustomerOrderClient({
     } else if (qrisEnabled && !transferEnabled && directMethod === "transfer") {
       setDirectMethod("qris");
     }
-  }, [settings, directEnabled, onsiteEnabled, qrisEnabled, transferEnabled, payMode, directMethod]);
+
+    if (!pickupEnabled && deliveryEnabled && deliveryType === "pickup") {
+      setDeliveryType("delivery");
+    } else if (pickupEnabled && !deliveryEnabled && deliveryType === "delivery") {
+      setDeliveryType("pickup");
+    }
+  }, [
+    settings,
+    directEnabled,
+    onsiteEnabled,
+    qrisEnabled,
+    transferEnabled,
+    pickupEnabled,
+    deliveryEnabled,
+    payMode,
+    directMethod,
+    deliveryType,
+  ]);
 
   // Dengarkan pembaruan poster/pengaturan storefront secara real-time dari admin
   useEffect(() => {
@@ -219,6 +280,11 @@ export function CustomerOrderClient({
     e.preventDefault();
     if (!product) return;
 
+    if (deliveryType === "delivery" && deliveryAddress.trim().length < 5) {
+      setErrorMsg("Mohon isi alamat kos lengkap untuk pengantaran.");
+      return;
+    }
+
     setErrorMsg(null);
     setSubmitting(true);
 
@@ -231,6 +297,8 @@ export function CustomerOrderClient({
           customer_phone: customerPhone,
           quantity,
           payment_method: directMethod,
+          delivery_type: deliveryType,
+          delivery_address: deliveryType === "delivery" ? deliveryAddress.trim() : "",
         }),
       });
       const json = await res.json();
@@ -268,6 +336,7 @@ export function CustomerOrderClient({
   const handleResetNewOrder = () => {
     setTrackedOrder(null);
     setQuantity(1);
+    setDeliveryAddress("");
     setErrorMsg(null);
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(LAST_ORDER_STORAGE_KEY);
@@ -278,10 +347,16 @@ export function CustomerOrderClient({
   const buildOnsiteChatUrl = () => {
     const nama = customerName.trim() || "Pembeli";
     const hp = customerPhone.trim() ? ` (${customerPhone.trim()})` : "";
+    const deliveryLine =
+      deliveryType === "delivery"
+        ? `Pengambilan: Diantar ke Kos (+${formatRupiah(activeDeliveryFee)})\nAlamat Kos: ${deliveryAddress.trim() || "-"}`
+        : `Pengambilan: Ambil / COD di lokasi (${settings?.pickup_info || "Telkom University Purwokerto"})`;
     const msg = [
       `Halo Kak ${storefront?.businessName || "Nummie"}, saya ${nama}${hp}.`,
       `Saya mau pesan Onsite:`,
-      `- ${quantity}x ${product?.name || "Paket Lumpia Ubi Ungu (coklat & keju)"} (${formatRupiah(totalAmount)})`,
+      `- ${quantity}x ${product?.name || "Paket Lumpia Ubi Ungu (coklat & keju)"} (${formatRupiah(productSubtotal)})`,
+      deliveryLine,
+      `Total: ${formatRupiah(totalAmount)}`,
       `Metode bayar: ONSITE / BAYAR DI TEMPAT (konfirmasi WhatsApp).`,
     ].join("\n");
     return `https://wa.me/${storeWaNumber}?text=${encodeURIComponent(msg)}`;
@@ -291,10 +366,16 @@ export function CustomerOrderClient({
     const methodLabel = getCustomerPaymentMethodLabel(
       resolveCustomerOrderPaymentMethod(order)
     );
+    const delivery = resolveCustomerOrderDelivery(order);
+    const deliveryLine =
+      delivery.delivery_type === "delivery"
+        ? `Pengambilan: Diantar ke Kos (${delivery.delivery_address || "-"})`
+        : `Pengambilan: Ambil / COD di lokasi`;
     const msg = [
       `Halo Kak ${storefront?.businessName || "Nummie"}, saya ${order.customer_name} sudah pesan via web.`,
       `Kode Pesanan: *${order.order_number}*`,
       `Pesanan: ${order.quantity}x ${order.product_name}`,
+      deliveryLine,
       `Total (${methodLabel}): ${formatRupiah(order.total_amount)}`,
       `Berikut saya konfirmasi pembayarannya ya Kak.`,
     ].join("\n");
@@ -387,16 +468,67 @@ export function CustomerOrderClient({
             </div>
 
             {/* Order Details Summary */}
-            <div className="rounded-xl bg-white/80 border border-[#1C1917]/10 p-4 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-bold text-[#1C1917]">
-                  {trackedOrder.quantity}x {trackedOrder.product_name}
-                </p>
-              </div>
-              <p className="text-lg font-extrabold text-[#14532D] tabular-nums shrink-0">
-                {formatRupiah(trackedOrder.total_amount)}
-              </p>
-            </div>
+            {(() => {
+              const trackedDelivery = resolveCustomerOrderDelivery(trackedOrder);
+              const menuSubtotal =
+                Number(trackedOrder.unit_price) * Number(trackedOrder.quantity);
+              return (
+                <div className="rounded-xl bg-white/85 border border-[#1C1917]/10 p-4 space-y-2.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-sm font-bold text-[#1C1917]">
+                        {trackedOrder.quantity}x {trackedOrder.product_name}
+                      </p>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                          trackedDelivery.delivery_type === "delivery"
+                            ? "bg-[#B43D0A]/15 text-[#B43D0A]"
+                            : "bg-[#14532D]/10 text-[#14532D]"
+                        }`}
+                      >
+                        {trackedDelivery.delivery_type === "delivery" ? (
+                          <>
+                            <Truck size={12} weight="bold" aria-hidden="true" />
+                            <span>
+                              Diantar ke Kos (+{formatRupiah(trackedDelivery.delivery_fee)})
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <MapPin size={12} weight="bold" aria-hidden="true" />
+                            <span>Ambil / COD di Lokasi</span>
+                          </>
+                        )}
+                      </span>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-lg font-extrabold text-[#14532D] tabular-nums">
+                        {formatRupiah(trackedOrder.total_amount)}
+                      </p>
+                      {trackedDelivery.delivery_type === "delivery" ? (
+                        <p className="text-[11px] text-[#44403C] tabular-nums">
+                          Menu {formatRupiah(menuSubtotal)} + Ongkir{" "}
+                          {formatRupiah(trackedDelivery.delivery_fee)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {trackedDelivery.delivery_type === "delivery" &&
+                  trackedDelivery.delivery_address ? (
+                    <p className="text-xs text-[#1C1917] bg-black/[0.04] rounded-lg px-3 py-2">
+                      <strong>Alamat Kos:</strong> {trackedDelivery.delivery_address}
+                    </p>
+                  ) : null}
+
+                  {trackedDelivery.delivery_type === "pickup" && settings?.pickup_info ? (
+                    <p className="text-xs text-[#44403C] bg-emerald-50/75 border border-[#14532D]/15 rounded-lg px-3 py-2">
+                      <strong>Jadwal Ambil / COD:</strong> {settings.pickup_info}
+                    </p>
+                  ) : null}
+                </div>
+              );
+            })()}
 
             {/* Live Progress Steps */}
             <div className="space-y-3">
@@ -499,7 +631,7 @@ export function CustomerOrderClient({
                     {trackedOrder.fulfillment_status === "completed"
                       ? "Pesanan selesai dan sudah diambil. Terima kasih sudah berbelanja!"
                       : trackedOrder.fulfillment_status === "ready"
-                        ? "Pesanan Anda SUDAH JADI & siap diambil sekarang!"
+                        ? "Pesanan Anda sudah jadi."
                         : trackedOrder.fulfillment_status === "preparing"
                           ? "Pesanan Anda sedang dibuat oleh tim dapur."
                           : trackedOrder.fulfillment_status === "cancelled"
@@ -664,7 +796,9 @@ export function CustomerOrderClient({
                         </div>
 
                         <div className="text-right">
-                          <span className="block text-[11px] text-[#44403C]">Total Bayar</span>
+                          <span className="block text-[11px] text-[#44403C]">
+                            {activeDeliveryFee > 0 ? "Total + Ongkir" : "Subtotal Menu"}
+                          </span>
                           <span className="text-lg font-extrabold text-[#B43D0A] tabular-nums">
                             {formatRupiah(totalAmount)}
                           </span>
@@ -672,6 +806,138 @@ export function CustomerOrderClient({
                       </div>
                     </div>
                   </div>
+                </section>
+
+                {/* Pickup Schedule & Delivery Option Card */}
+                <section className="glass-panel rounded-2xl p-5 space-y-4">
+                  <div className="space-y-1">
+                    <h2 className="text-base font-bold text-[#1C1917]">
+                      Pilih Pengambilan / Pengantaran
+                    </h2>
+                    <p className="text-xs text-[#44403C]">
+                      Tentukan apakah pesanan diambil / COD langsung atau diantar ke kos Anda.
+                    </p>
+                  </div>
+
+                  {settings?.pickup_info ? (
+                    <div className="rounded-xl border border-[#14532D]/20 bg-emerald-50/80 px-3.5 py-2.5 flex items-start gap-2.5">
+                      <Clock
+                        size={18}
+                        weight="duotone"
+                        className="text-[#14532D] shrink-0 mt-0.5"
+                        aria-hidden="true"
+                      />
+                      <div className="text-xs text-[#1C1917] leading-relaxed">
+                        <p className="font-bold text-[#14532D]">Info Ready & Jadwal COD</p>
+                        <p>{settings.pickup_info}</p>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {pickupEnabled || deliveryEnabled ? (
+                    <div
+                      className={`grid gap-2.5 ${
+                        pickupEnabled && deliveryEnabled
+                          ? "grid-cols-1 sm:grid-cols-2"
+                          : "grid-cols-1"
+                      }`}
+                    >
+                      {pickupEnabled ? (
+                        <button
+                          type="button"
+                          onClick={() => setDeliveryType("pickup")}
+                          className={`min-h-14 rounded-xl border p-3.5 text-left transition-colors cursor-pointer space-y-1 ${
+                            deliveryType === "pickup"
+                              ? "border-[#14532D] bg-[#14532D] text-white"
+                              : "border-[#1C1917]/20 bg-white text-[#1C1917] hover:bg-black/[0.02]"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold">
+                              <MapPin size={16} weight="bold" aria-hidden="true" />
+                              Ambil / COD di Lokasi
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[11px] font-bold shrink-0 ${
+                                deliveryType === "pickup"
+                                  ? "bg-white/20 text-white"
+                                  : "bg-emerald-100 text-[#14532D]"
+                              }`}
+                            >
+                              Gratis Ongkir
+                            </span>
+                          </div>
+                          <p
+                            className={`text-[11px] leading-snug ${
+                              deliveryType === "pickup" ? "text-white/90" : "text-[#44403C]"
+                            }`}
+                          >
+                            {settings?.pickup_info ||
+                              "Ambil / COD di Telkom University Purwokerto (Hari Senin)"}
+                          </p>
+                        </button>
+                      ) : null}
+
+                      {deliveryEnabled ? (
+                        <button
+                          type="button"
+                          onClick={() => setDeliveryType("delivery")}
+                          className={`min-h-14 rounded-xl border p-3.5 text-left transition-colors cursor-pointer space-y-1 ${
+                            deliveryType === "delivery"
+                              ? "border-[#14532D] bg-[#14532D] text-white"
+                              : "border-[#1C1917]/20 bg-white text-[#1C1917] hover:bg-black/[0.02]"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold">
+                              <Truck size={16} weight="bold" aria-hidden="true" />
+                              Diantar ke Kos
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[11px] font-bold shrink-0 tabular-nums ${
+                                deliveryType === "delivery"
+                                  ? "bg-white/20 text-white"
+                                  : "bg-[#FEF3C7] text-[#92400E]"
+                              }`}
+                            >
+                              +{formatRupiah(configuredDeliveryFee)}
+                            </span>
+                          </div>
+                          <p
+                            className={`text-[11px] leading-snug ${
+                              deliveryType === "delivery" ? "text-white/90" : "text-[#44403C]"
+                            }`}
+                          >
+                            {settings?.delivery_info ||
+                              `Tambah ongkir ${formatRupiah(configuredDeliveryFee)}, langsung diantar ke kos.`}
+                          </p>
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {deliveryType === "delivery" && deliveryEnabled ? (
+                    <div className="space-y-1.5 pt-1">
+                      <label
+                        htmlFor="deliveryAddress"
+                        className="block text-xs font-semibold text-[#1C1917]"
+                      >
+                        Alamat Kos / Lokasi Pengantaran
+                      </label>
+                      <textarea
+                        id="deliveryAddress"
+                        rows={2}
+                        required={deliveryType === "delivery"}
+                        value={deliveryAddress}
+                        onChange={(e) => setDeliveryAddress(e.target.value)}
+                        placeholder="Contoh: Kos Melati Kamar 5, Jl. DI Panjaitan (patokan depan warung/gerbang)"
+                        className="w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 py-2.5 text-sm text-[#1C1917]"
+                      />
+                      <p className="text-[11px] font-medium text-[#14532D] tabular-nums">
+                        Ongkir antar +{formatRupiah(configuredDeliveryFee)} otomatis masuk ke total tagihan.
+                      </p>
+                    </div>
+                  ) : null}
                 </section>
 
                 {/* Buyer Info Card */}
@@ -817,14 +1083,13 @@ export function CustomerOrderClient({
                       {directMethod === "qris" && qrisEnabled ? (
                         <div className="space-y-4">
                           <div className="rounded-xl bg-white border border-[#1C1917]/15 p-4 text-center space-y-3">
-                            <div>
-                              <p className="text-xs font-semibold text-[#44403C]">
-                                Silakan scan atau simpan QRIS untuk total:
-                              </p>
-                              <p className="text-2xl font-extrabold text-[#14532D] tabular-nums">
-                                {formatRupiah(totalAmount)}
-                              </p>
-                            </div>
+                            <PaymentAmountBreakdown
+                              title="Silakan scan atau simpan QRIS untuk total:"
+                              quantity={quantity}
+                              productSubtotal={productSubtotal}
+                              deliveryFee={activeDeliveryFee}
+                              totalAmount={totalAmount}
+                            />
 
                             {storefront.qrisImageUrl ? (
                               <div className="space-y-2.5">
@@ -883,14 +1148,13 @@ export function CustomerOrderClient({
                       ) : transferEnabled ? (
                         <div className="space-y-4">
                           <div className="rounded-xl bg-white border border-[#1C1917]/15 p-4 space-y-3.5">
-                            <div className="text-center space-y-0.5">
-                              <p className="text-xs font-semibold text-[#44403C]">
-                                Silakan transfer tepat sesuai nominal:
-                              </p>
-                              <p className="text-2xl font-extrabold text-[#14532D] tabular-nums">
-                                {formatRupiah(totalAmount)}
-                              </p>
-                            </div>
+                            <PaymentAmountBreakdown
+                              title="Silakan transfer tepat sesuai nominal:"
+                              quantity={quantity}
+                              productSubtotal={productSubtotal}
+                              deliveryFee={activeDeliveryFee}
+                              totalAmount={totalAmount}
+                            />
 
                             {storefront.bankAccountNumber.trim() ? (
                               <div className="rounded-xl border border-[#14532D]/20 bg-[#14532D]/[0.04] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -955,11 +1219,35 @@ export function CustomerOrderClient({
                         {settings?.cash_instruction ||
                           "Untuk menjaga ketersediaan stok, pemesanan onsite (bayar di tempat) langsung dikonfirmasi lewat chat WhatsApp dengan detail pesanan Anda."}
                       </p>
+                      {activeDeliveryFee > 0 ? (
+                        <p className="text-xs font-semibold text-[#14532D] tabular-nums">
+                          Total Menu {formatRupiah(productSubtotal)} + Ongkir Antar{" "}
+                          {formatRupiah(activeDeliveryFee)} = {formatRupiah(totalAmount)}
+                        </p>
+                      ) : null}
+                      {deliveryType === "delivery" && deliveryAddress.trim().length < 5 ? (
+                        <p className="text-xs font-medium text-[#B43D0A] bg-[#FEF3C7] rounded-xl px-3 py-2">
+                          Isi alamat kos lengkap di bagian atas terlebih dahulu sebelum lanjut ke WhatsApp.
+                        </p>
+                      ) : null}
                       {storeWaNumber ? (
                         <a
                           href={buildOnsiteChatUrl()}
                           target="_blank"
                           rel="noopener noreferrer"
+                          onClick={(e) => {
+                            if (
+                              deliveryType === "delivery" &&
+                              deliveryAddress.trim().length < 5
+                            ) {
+                              e.preventDefault();
+                              setErrorMsg(
+                                "Mohon isi alamat kos lengkap terlebih dahulu untuk pengantaran."
+                              );
+                            } else {
+                              setErrorMsg(null);
+                            }
+                          }}
                           className="min-h-12 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#B43D0A] px-4 py-3 text-sm font-extrabold text-white hover:bg-[#9A3412] transition-colors"
                         >
                           <WhatsappLogo size={20} weight="bold" aria-hidden="true" />

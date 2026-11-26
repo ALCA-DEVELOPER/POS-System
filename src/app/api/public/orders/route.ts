@@ -4,7 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { toJakartaDateKey, isMissingTableError } from "@/lib/analytics";
 import { getPublicStorefrontData } from "@/lib/server/storefront";
 import {
-  buildTransferFallbackNotes,
+  buildFallbackOrderMetaNotes,
+  resolveCustomerOrderDelivery,
   resolveCustomerOrderPaymentMethod,
 } from "@/lib/customer-order-payment";
 
@@ -17,6 +18,8 @@ const createPublicOrderSchema = z.object({
     .max(25),
   quantity: z.number().int().min(1, "Jumlah minimal 1").max(100, "Maksimal 100 paket per order"),
   payment_method: z.enum(["qris", "transfer"]).optional().default("qris"),
+  delivery_type: z.enum(["pickup", "delivery"]).optional().default("pickup"),
+  delivery_address: z.string().trim().max(400).optional().default(""),
   notes: z.string().trim().max(300).optional().default(""),
 });
 
@@ -57,7 +60,15 @@ export async function POST(request: Request) {
       );
     }
 
-    const { customer_name, customer_phone, quantity, payment_method, notes } = parsed.data;
+    const {
+      customer_name,
+      customer_phone,
+      quantity,
+      payment_method,
+      delivery_type,
+      delivery_address,
+      notes,
+    } = parsed.data;
     if (payment_method === "qris" && !storefront.settings.enable_qris) {
       return NextResponse.json(
         { error: "Pemesanan QRIS lewat web sedang tidak aktif." },
@@ -76,16 +87,36 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+    if (delivery_type === "pickup" && !storefront.settings.enable_pickup) {
+      return NextResponse.json(
+        { error: "Opsi ambil / COD di lokasi sedang dinonaktifkan." },
+        { status: 400 }
+      );
+    }
+    if (delivery_type === "delivery" && !storefront.settings.enable_delivery) {
+      return NextResponse.json(
+        { error: "Opsi antar ke kos sedang dinonaktifkan." },
+        { status: 400 }
+      );
+    }
+    if (delivery_type === "delivery" && delivery_address.trim().length < 5) {
+      return NextResponse.json(
+        { error: "Mohon isi alamat kos lengkap untuk pengantaran (minimal 5 karakter)." },
+        { status: 400 }
+      );
+    }
 
     const unitPrice = Number(storefront.product.price);
-    const totalAmount = unitPrice * quantity;
+    const deliveryFee =
+      delivery_type === "delivery"
+        ? Math.max(0, Number(storefront.settings.delivery_fee ?? 2000))
+        : 0;
+    const cleanAddress = delivery_type === "delivery" ? delivery_address.trim() : "";
+    const totalAmount = unitPrice * quantity + deliveryFee;
 
     const todayCompact = toJakartaDateKey(new Date()).replace(/-/g, "").slice(2);
     const suffix = Math.floor(1000 + Math.random() * 9000);
     const orderNumber = `WEB-${todayCompact}-${suffix}`;
-
-    const selectColumns =
-      "id, order_number, customer_name, customer_phone, product_name, quantity, unit_price, total_amount, payment_method, payment_status, fulfillment_status, notes, created_at";
 
     const admin = createAdminClient();
     let { data: created, error } = await admin
@@ -103,38 +134,54 @@ export async function POST(request: Request) {
         payment_method,
         payment_status: "pending",
         fulfillment_status: "pending",
+        delivery_type,
+        delivery_fee: deliveryFee,
+        delivery_address: cleanAddress,
         notes,
       })
-      .select(selectColumns)
+      .select("*")
       .single();
 
-    if (
-      error &&
-      payment_method === "transfer" &&
-      ((error as { code?: string }).code === "23514" ||
-        error.message.includes("customer_orders_payment_method_check"))
-    ) {
-      const retry = await admin
-        .from("customer_orders")
-        .insert({
-          business_id: storefront.businessId,
-          order_number: orderNumber,
-          customer_name,
-          customer_phone,
-          product_id: storefront.product.id,
-          product_name: storefront.product.name,
-          quantity,
-          unit_price: unitPrice,
-          total_amount: totalAmount,
-          payment_method: "qris",
-          payment_status: "pending",
-          fulfillment_status: "pending",
-          notes: buildTransferFallbackNotes(notes),
-        })
-        .select(selectColumns)
-        .single();
-      created = retry.data;
-      error = retry.error;
+    if (error && !isMissingTableError(error, "customer_orders")) {
+      const code = (error as { code?: string }).code ?? "";
+      const isSchemaMismatch =
+        code === "23514" ||
+        code === "42703" ||
+        code === "PGRST204" ||
+        error.message.includes("customer_orders_payment_method_check") ||
+        error.message.includes("delivery_type") ||
+        error.message.includes("delivery_fee") ||
+        error.message.includes("delivery_address");
+
+      if (isSchemaMismatch) {
+        const retry = await admin
+          .from("customer_orders")
+          .insert({
+            business_id: storefront.businessId,
+            order_number: orderNumber,
+            customer_name,
+            customer_phone,
+            product_id: storefront.product.id,
+            product_name: storefront.product.name,
+            quantity,
+            unit_price: unitPrice,
+            total_amount: totalAmount,
+            payment_method: "qris",
+            payment_status: "pending",
+            fulfillment_status: "pending",
+            notes: buildFallbackOrderMetaNotes({
+              rawNotes: notes,
+              paymentMethod: payment_method,
+              deliveryType: delivery_type,
+              deliveryFee,
+              deliveryAddress: cleanAddress,
+            }),
+          })
+          .select("*")
+          .single();
+        created = retry.data;
+        error = retry.error;
+      }
     }
 
     if (error || !created) {
@@ -164,6 +211,7 @@ export async function POST(request: Request) {
         order: {
           ...created,
           payment_method: resolveCustomerOrderPaymentMethod(created),
+          ...resolveCustomerOrderDelivery(created),
         },
       },
       { status: 201 }

@@ -70,6 +70,11 @@ export default async function CustomerOrdersPage() {
             settingsRow.custom_price !== undefined
               ? Number(settingsRow.custom_price)
               : null,
+          delivery_fee:
+            settingsRow.delivery_fee !== null &&
+            settingsRow.delivery_fee !== undefined
+              ? Number(settingsRow.delivery_fee)
+              : defaults.delivery_fee,
         }
       : defaults;
 

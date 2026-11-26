@@ -12,10 +12,12 @@ import {
   Database,
   FloppyDisk,
   ImageSquare,
+  MapPin,
   Package,
   ShoppingBag,
   SlidersHorizontal,
   Trash,
+  Truck,
   UploadSimple,
   WhatsappLogo,
   XCircle,
@@ -25,6 +27,7 @@ import { formatDateId, formatRupiah, normalizeWhatsAppPhone } from "@/lib/format
 import { broadcastBusinessUpdate } from "@/lib/realtime";
 import {
   getCustomerPaymentMethodLabel,
+  resolveCustomerOrderDelivery,
   resolveCustomerOrderPaymentMethod,
   stripInternalPaymentTag,
 } from "@/lib/customer-order-payment";
@@ -50,6 +53,9 @@ const CUSTOMER_ORDERS_MIGRATION_SQL = `CREATE TABLE IF NOT EXISTS public.custome
   payment_method TEXT NOT NULL DEFAULT 'qris' CHECK (payment_method IN ('qris', 'transfer')),
   payment_status TEXT NOT NULL DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'rejected')),
   fulfillment_status TEXT NOT NULL DEFAULT 'pending' CHECK (fulfillment_status IN ('pending', 'preparing', 'ready', 'completed', 'cancelled')),
+  delivery_type TEXT NOT NULL DEFAULT 'pickup' CHECK (delivery_type IN ('pickup', 'delivery')),
+  delivery_fee NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0),
+  delivery_address TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
   linked_order_id UUID REFERENCES public.orders(id) ON DELETE SET NULL,
   paid_verified_at TIMESTAMPTZ,
@@ -97,6 +103,11 @@ CREATE TABLE IF NOT EXISTS public.storefront_settings (
   qris_instruction TEXT NOT NULL DEFAULT 'Setelah berhasil transfer via QRIS, tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda.',
   transfer_instruction TEXT NOT NULL DEFAULT 'Transfer tepat sesuai nominal ke rekening bank di atas, lalu tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda.',
   cash_instruction TEXT NOT NULL DEFAULT 'Untuk menjaga ketersediaan stok, pemesanan onsite (bayar di tempat) langsung dikonfirmasi lewat chat WhatsApp dengan detail pesanan Anda.',
+  enable_pickup BOOLEAN NOT NULL DEFAULT true,
+  enable_delivery BOOLEAN NOT NULL DEFAULT true,
+  delivery_fee NUMERIC(14,2) NOT NULL DEFAULT 2000 CHECK (delivery_fee >= 0),
+  pickup_info TEXT NOT NULL DEFAULT 'Ready hari Senin! Bisa ambil / COD di Telkom University Purwokerto pukul 10.00 - 16.00 WIB.',
+  delivery_info TEXT NOT NULL DEFAULT 'Diantar langsung ke area kos Purwokerto (ongkir Rp 2.000).',
   whatsapp_number TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -168,6 +179,11 @@ function serializeStorefrontSettings(s: StorefrontSettings): string {
     qris_instruction: s.qris_instruction,
     transfer_instruction: s.transfer_instruction,
     cash_instruction: s.cash_instruction,
+    enable_pickup: s.enable_pickup ?? true,
+    enable_delivery: s.enable_delivery ?? true,
+    delivery_fee: s.delivery_fee ?? 2000,
+    pickup_info: s.pickup_info ?? "",
+    delivery_info: s.delivery_info ?? "",
     whatsapp_number: s.whatsapp_number,
   });
 }
@@ -237,6 +253,21 @@ export function CustomerOrdersClient({
   const [cashInstruction, setCashInstruction] = useState(
     initialSettings.cash_instruction
   );
+  const [enablePickup, setEnablePickup] = useState(initialSettings.enable_pickup ?? true);
+  const [enableDelivery, setEnableDelivery] = useState(
+    initialSettings.enable_delivery ?? true
+  );
+  const [deliveryFeeInput, setDeliveryFeeInput] = useState(
+    String(initialSettings.delivery_fee ?? 2000)
+  );
+  const [pickupInfo, setPickupInfo] = useState(
+    initialSettings.pickup_info ??
+      "Ready hari Senin! Bisa ambil / COD di Telkom University Purwokerto pukul 10.00 - 16.00 WIB."
+  );
+  const [deliveryInfo, setDeliveryInfo] = useState(
+    initialSettings.delivery_info ??
+      "Diantar langsung ke area kos Purwokerto (ongkir Rp 2.000)."
+  );
   const [whatsappNumber, setWhatsappNumber] = useState(initialSettings.whatsapp_number);
   const [uploadingPoster, setUploadingPoster] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -278,6 +309,17 @@ export function CustomerOrdersClient({
     setQrisInstruction(initialSettings.qris_instruction);
     setTransferInstruction(initialSettings.transfer_instruction);
     setCashInstruction(initialSettings.cash_instruction);
+    setEnablePickup(initialSettings.enable_pickup ?? true);
+    setEnableDelivery(initialSettings.enable_delivery ?? true);
+    setDeliveryFeeInput(String(initialSettings.delivery_fee ?? 2000));
+    setPickupInfo(
+      initialSettings.pickup_info ??
+        "Ready hari Senin! Bisa ambil / COD di Telkom University Purwokerto pukul 10.00 - 16.00 WIB."
+    );
+    setDeliveryInfo(
+      initialSettings.delivery_info ??
+        "Diantar langsung ke area kos Purwokerto (ongkir Rp 2.000)."
+    );
     setWhatsappNumber(initialSettings.whatsapp_number);
   }, [initialSettings]);
 
@@ -285,6 +327,7 @@ export function CustomerOrdersClient({
     const resolvedPoster = overridePosterUrl !== undefined ? overridePosterUrl : posterUrl;
     const trimmedPrice = customPriceInput.trim();
     const parsedPrice = trimmedPrice === "" ? null : Math.max(0, Number(trimmedPrice) || 0);
+    const parsedDeliveryFee = Math.max(0, Number(deliveryFeeInput) || 0);
 
     const res = await fetch("/api/storefront", {
       method: "PUT",
@@ -305,6 +348,11 @@ export function CustomerOrdersClient({
         qris_instruction: qrisInstruction.trim(),
         transfer_instruction: transferInstruction.trim(),
         cash_instruction: cashInstruction.trim(),
+        enable_pickup: enablePickup,
+        enable_delivery: enableDelivery,
+        delivery_fee: parsedDeliveryFee,
+        pickup_info: pickupInfo.trim(),
+        delivery_info: deliveryInfo.trim(),
         whatsapp_number: whatsappNumber.trim(),
       }),
     });
@@ -315,7 +363,7 @@ export function CustomerOrdersClient({
     const saved = json.settings as StorefrontSettings;
     settingsDirtyRef.current = false;
     lastSyncedSettingsRef.current = serializeStorefrontSettings(saved);
-    return saved;
+    return { settings: saved, needsMigration: Boolean(json.needsMigration) };
   };
 
   const handlePosterUpload = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -373,8 +421,12 @@ export function CustomerOrdersClient({
     setErrorMsg(null);
     setSuccessMsg(null);
     try {
-      await persistStorefront();
-      setSuccessMsg("Pengaturan halaman pembeli berhasil disimpan dan langsung live!");
+      const { needsMigration } = await persistStorefront();
+      setSuccessMsg(
+        needsMigration
+          ? "Pengaturan utama tersimpan. Jalankan SQL migrasi 006 di Supabase agar perubahan jadwal & ongkir ikut tersimpan permanen."
+          : "Pengaturan halaman pembeli berhasil disimpan dan langsung live!"
+      );
       router.refresh();
     } catch (err) {
       setErrorMsg(
@@ -498,9 +550,14 @@ export function CustomerOrdersClient({
     const methodLabel = getCustomerPaymentMethodLabel(
       resolveCustomerOrderPaymentMethod(order)
     );
+    const delivery = resolveCustomerOrderDelivery(order);
+    const readySuffix =
+      delivery.delivery_type === "delivery"
+        ? ` dan siap diantar ke alamat: ${delivery.delivery_address || "kos Anda"} ya!`
+        : ` dan bisa diambil / COD sesuai jadwal (${pickupInfo.trim() || "Telkom University Purwokerto"}) ya!`;
     const text =
       order.fulfillment_status === "ready"
-        ? `Halo Kak ${order.customer_name}, pesanan ${order.order_number} (${order.quantity}x ${order.product_name}) di ${businessName || "Nummie"} SUDAH JADI dan siap diambil ya!`
+        ? `Halo Kak ${order.customer_name}, pesanan ${order.order_number} (${order.quantity}x ${order.product_name}) di ${businessName || "Nummie"} sudah jadi${readySuffix}`
         : order.payment_status === "paid"
           ? `Halo Kak ${order.customer_name}, pembayaran ${methodLabel} pesanan ${order.order_number} sudah kami terima dan sedang dibuat ya.`
           : `Halo Kak ${order.customer_name}, mengenai pesanan ${order.order_number} (${order.quantity}x ${order.product_name}) total ${formatRupiah(order.total_amount)}, bisa bantu kirim bukti bayar ${methodLabel}-nya?`;
@@ -996,6 +1053,88 @@ export function CustomerOrdersClient({
                 className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917] tabular-nums"
               />
             </div>
+          </section>
+
+          {/* Pickup Schedule & Kos Delivery Settings */}
+          <section className="glass-panel rounded-2xl p-5 space-y-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-bold text-[#1C1917]">
+                Jadwal COD / Ambil & Pengantaran ke Kos
+              </h2>
+              <p className="text-xs text-[#44403C]">
+                Atur jadwal pengambilan hari Senin di Telkom University Purwokerto serta ongkos kirim antar ke kos.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="min-h-11 rounded-xl border border-[#1C1917]/15 bg-white px-3.5 py-2.5 flex items-center gap-2.5 text-sm font-semibold text-[#1C1917] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={enablePickup}
+                  onChange={(e) => setEnablePickup(e.target.checked)}
+                  className="w-4 h-4 accent-[#14532D]"
+                />
+                <span>Aktifkan Ambil / COD di Lokasi (Gratis)</span>
+              </label>
+
+              <label className="min-h-11 rounded-xl border border-[#1C1917]/15 bg-white px-3.5 py-2.5 flex items-center gap-2.5 text-sm font-semibold text-[#1C1917] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={enableDelivery}
+                  onChange={(e) => setEnableDelivery(e.target.checked)}
+                  className="w-4 h-4 accent-[#B43D0A]"
+                />
+                <span>Aktifkan Diantar ke Kos (+Ongkir)</span>
+              </label>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="sfPickupInfo" className="block text-xs font-semibold text-[#1C1917]">
+                Jadwal Ready & Lokasi COD / Ambil (Edit Jam Hari Senin di Sini)
+              </label>
+              <textarea
+                id="sfPickupInfo"
+                rows={2}
+                value={pickupInfo}
+                onChange={(e) => setPickupInfo(e.target.value)}
+                placeholder="Contoh: Ready hari Senin! Bisa ambil / COD di Telkom University Purwokerto pukul 10.00 - 16.00 WIB."
+                className="w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 py-2.5 text-sm text-[#1C1917]"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label htmlFor="sfDeliveryFee" className="block text-xs font-semibold text-[#1C1917]">
+                  Biaya Ongkir Antar ke Kos (Rp)
+                </label>
+                <input
+                  id="sfDeliveryFee"
+                  type="number"
+                  min={0}
+                  step={500}
+                  value={deliveryFeeInput}
+                  onChange={(e) => setDeliveryFeeInput(e.target.value)}
+                  className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917] tabular-nums"
+                />
+                <p className="text-[11px] font-semibold text-[#14532D] tabular-nums">
+                  Ongkir aktif: +{formatRupiah(Number(deliveryFeeInput) || 0)}
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="sfDeliveryInfo" className="block text-xs font-semibold text-[#1C1917]">
+                  Keterangan Pengantaran ke Kos
+                </label>
+                <input
+                  id="sfDeliveryInfo"
+                  type="text"
+                  value={deliveryInfo}
+                  onChange={(e) => setDeliveryInfo(e.target.value)}
+                  placeholder="Contoh: Diantar langsung ke area kos Purwokerto (ongkir Rp 2.000)."
+                  className="min-h-11 w-full rounded-xl border border-[#1C1917]/20 bg-white px-3.5 text-sm text-[#1C1917]"
+                />
+              </div>
+            </div>
 
             <div className="pt-1">
               <button
@@ -1051,7 +1190,9 @@ export function CustomerOrdersClient({
             const methodLabel = getCustomerPaymentMethodLabel(
               resolveCustomerOrderPaymentMethod(order)
             );
+            const delivery = resolveCustomerOrderDelivery(order);
             const cleanNotes = stripInternalPaymentTag(order.notes);
+            const menuSubtotal = Number(order.unit_price) * Number(order.quantity);
 
             return (
               <article
@@ -1063,6 +1204,28 @@ export function CustomerOrdersClient({
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm sm:text-base font-extrabold text-[#1C1917] tabular-nums">
                         {order.order_number}
+                      </span>
+
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold inline-flex items-center gap-1 ${
+                          delivery.delivery_type === "delivery"
+                            ? "bg-[#B43D0A]/15 text-[#B43D0A]"
+                            : "bg-black/8 text-[#1C1917]"
+                        }`}
+                      >
+                        {delivery.delivery_type === "delivery" ? (
+                          <>
+                            <Truck size={12} weight="bold" aria-hidden="true" />
+                            <span>
+                              Diantar ke Kos (+{formatRupiah(delivery.delivery_fee)})
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <MapPin size={12} weight="bold" aria-hidden="true" />
+                            <span>Ambil / COD</span>
+                          </>
+                        )}
                       </span>
 
                       <span
@@ -1120,6 +1283,12 @@ export function CustomerOrdersClient({
                       <strong>{order.quantity}x</strong> {order.product_name}
                     </p>
 
+                    {delivery.delivery_type === "delivery" && delivery.delivery_address ? (
+                      <p className="text-xs text-[#1C1917] bg-[#FEF3C7]/70 border border-[#92400E]/20 rounded-lg px-2.5 py-1.5">
+                        <strong>Alamat Kos:</strong> {delivery.delivery_address}
+                      </p>
+                    ) : null}
+
                     {cleanNotes ? (
                       <p className="text-xs text-[#44403C] bg-black/5 rounded-lg px-2.5 py-1.5 inline-block">
                         Catatan: {cleanNotes}
@@ -1136,6 +1305,12 @@ export function CustomerOrdersClient({
                     <p className="text-xl font-extrabold text-[#14532D] tabular-nums">
                       {formatRupiah(order.total_amount)}
                     </p>
+                    {delivery.delivery_type === "delivery" ? (
+                      <p className="text-[11px] text-[#44403C] tabular-nums">
+                        Menu {formatRupiah(menuSubtotal)} + Ongkir{" "}
+                        {formatRupiah(delivery.delivery_fee)}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
 

@@ -27,6 +27,23 @@ const updateStorefrontSchema = z.object({
       "Transfer tepat sesuai nominal ke rekening bank di atas, lalu tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda."
     ),
   cash_instruction: z.string().trim().max(500),
+  enable_pickup: z.boolean().optional().default(true),
+  enable_delivery: z.boolean().optional().default(true),
+  delivery_fee: z.number().min(0).optional().default(2000),
+  pickup_info: z
+    .string()
+    .trim()
+    .max(500)
+    .optional()
+    .default(
+      "Ready hari Senin! Bisa ambil / COD di Telkom University Purwokerto pukul 10.00 - 16.00 WIB."
+    ),
+  delivery_info: z
+    .string()
+    .trim()
+    .max(500)
+    .optional()
+    .default("Diantar langsung ke area kos Purwokerto (ongkir Rp 2.000)."),
   whatsapp_number: z.string().trim().max(30),
 });
 
@@ -64,6 +81,7 @@ export async function PUT(request: Request) {
     }
 
     const admin = createAdminClient();
+    let needsMigration = false;
     let { data: saved, error } = await admin
       .from("storefront_settings")
       .upsert(
@@ -76,35 +94,56 @@ export async function PUT(request: Request) {
       .select("*")
       .single();
 
-    if (
-      error &&
-      (error.message.includes("enable_transfer") ||
-        error.message.includes("transfer_instruction"))
-    ) {
-      const {
-        enable_transfer: omittedEnableTransfer,
-        transfer_instruction: omittedTransferInstruction,
-        ...legacyData
-      } = parsed.data;
-      const retry = await admin
-        .from("storefront_settings")
-        .upsert(
-          {
-            business_id: profile.business_id,
-            ...legacyData,
-          },
-          { onConflict: "business_id" }
-        )
-        .select("*")
-        .single();
-      saved = retry.data
-        ? {
-            ...retry.data,
-            enable_transfer: omittedEnableTransfer,
-            transfer_instruction: omittedTransferInstruction,
-          }
-        : null;
-      error = retry.error;
+    if (error && !isMissingTableError(error, "storefront_settings")) {
+      const code = (error as { code?: string }).code ?? "";
+      const isMissingCol =
+        code === "42703" ||
+        code === "PGRST204" ||
+        error.message.includes("enable_transfer") ||
+        error.message.includes("transfer_instruction") ||
+        error.message.includes("enable_pickup") ||
+        error.message.includes("enable_delivery") ||
+        error.message.includes("delivery_fee") ||
+        error.message.includes("pickup_info") ||
+        error.message.includes("delivery_info");
+
+      if (isMissingCol) {
+        needsMigration = true;
+        const {
+          enable_transfer: omittedEnableTransfer,
+          transfer_instruction: omittedTransferInstruction,
+          enable_pickup: omittedEnablePickup,
+          enable_delivery: omittedEnableDelivery,
+          delivery_fee: omittedDeliveryFee,
+          pickup_info: omittedPickupInfo,
+          delivery_info: omittedDeliveryInfo,
+          ...legacyData
+        } = parsed.data;
+        const retry = await admin
+          .from("storefront_settings")
+          .upsert(
+            {
+              business_id: profile.business_id,
+              ...legacyData,
+            },
+            { onConflict: "business_id" }
+          )
+          .select("*")
+          .single();
+        saved = retry.data
+          ? {
+              ...retry.data,
+              enable_transfer: omittedEnableTransfer,
+              transfer_instruction: omittedTransferInstruction,
+              enable_pickup: omittedEnablePickup,
+              enable_delivery: omittedEnableDelivery,
+              delivery_fee: omittedDeliveryFee,
+              pickup_info: omittedPickupInfo,
+              delivery_info: omittedDeliveryInfo,
+            }
+          : null;
+        error = retry.error;
+      }
     }
 
     if (error || !saved) {
@@ -133,7 +172,7 @@ export async function PUT(request: Request) {
       // Abaikan kegagalan broadcast sementara
     }
 
-    return NextResponse.json({ settings: saved });
+    return NextResponse.json({ settings: saved, needsMigration });
   } catch {
     return NextResponse.json({ error: "Permintaan tidak valid" }, { status: 400 });
   }

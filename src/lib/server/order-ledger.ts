@@ -118,6 +118,9 @@ export async function recordValidatedCustomerOrderSale(
     customerName: string;
     customerPhone: string;
     paymentMethod?: "qris" | "transfer";
+    deliveryType?: "pickup" | "delivery";
+    deliveryFee?: number;
+    deliveryAddress?: string;
     webOrderNumber: string;
   }
 ): Promise<string> {
@@ -132,6 +135,9 @@ export async function recordValidatedCustomerOrderSale(
     customerName,
     customerPhone,
     paymentMethod = "qris",
+    deliveryType = "pickup",
+    deliveryFee = 0,
+    deliveryAddress = "",
     webOrderNumber,
   } = params;
 
@@ -162,6 +168,13 @@ export async function recordValidatedCustomerOrderSale(
   const randomCode = Math.floor(100 + Math.random() * 900);
   const posOrderNumber = `KK-${todaySuffix}-${webOrderNumber.slice(-3)}-${randomCode}`;
 
+  const safeDeliveryFee = Math.max(0, Number(deliveryFee || 0));
+  const productSubtotal = Math.max(0, Number(totalAmount) - safeDeliveryFee);
+  const deliveryNote =
+    deliveryType === "delivery" && deliveryAddress.trim()
+      ? ` - Antar Kos: ${deliveryAddress.trim()}`
+      : " - COD / Ambil";
+
   const { data: createdOrder, error: orderErr } = await admin
     .from("orders")
     .insert({
@@ -169,10 +182,10 @@ export async function recordValidatedCustomerOrderSale(
       cashier_id: actorId,
       shift_id: null,
       order_number: posOrderNumber,
-      subtotal: totalAmount,
+      subtotal: productSubtotal,
       discount_amount: 0,
       tax_amount: 0,
-      service_amount: 0,
+      service_amount: safeDeliveryFee,
       total_amount: totalAmount,
       hpp_total: hppTotal,
       amount_paid: totalAmount,
@@ -180,7 +193,9 @@ export async function recordValidatedCustomerOrderSale(
       payment_method: paymentMethod,
       order_type: "online",
       customer_phone: customerPhone || null,
-      notes: customerName ? `${customerName} (${webOrderNumber})` : webOrderNumber,
+      notes: customerName
+        ? `${customerName} (${webOrderNumber})${deliveryNote}`
+        : `${webOrderNumber}${deliveryNote}`,
     })
     .select("id")
     .single();
@@ -196,7 +211,7 @@ export async function recordValidatedCustomerOrderSale(
     quantity,
     unit_price: unitPrice,
     unit_hpp: unitHpp,
-    subtotal: totalAmount,
+    subtotal: productSubtotal,
   });
 
   if (itemErr) {

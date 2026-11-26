@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { resolveCustomerOrderPaymentMethod } from "@/lib/customer-order-payment";
+import {
+  resolveCustomerOrderDelivery,
+  resolveCustomerOrderPaymentMethod,
+} from "@/lib/customer-order-payment";
 
 const uuidSchema = z.string().uuid();
 
@@ -17,9 +20,7 @@ export async function GET(
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("customer_orders")
-    .select(
-      "id, order_number, customer_name, customer_phone, product_name, quantity, unit_price, total_amount, payment_method, payment_status, fulfillment_status, notes, paid_verified_at, ready_at, created_at"
-    )
+    .select("*")
     .eq("id", id)
     .maybeSingle();
 
@@ -32,8 +33,22 @@ export async function GET(
 
   return NextResponse.json({
     order: {
-      ...data,
+      id: data.id,
+      order_number: data.order_number,
+      customer_name: data.customer_name,
+      customer_phone: data.customer_phone,
+      product_name: data.product_name,
+      quantity: data.quantity,
+      unit_price: data.unit_price,
+      total_amount: data.total_amount,
       payment_method: resolveCustomerOrderPaymentMethod(data),
+      payment_status: data.payment_status,
+      fulfillment_status: data.fulfillment_status,
+      notes: data.notes,
+      paid_verified_at: data.paid_verified_at,
+      ready_at: data.ready_at,
+      created_at: data.created_at,
+      ...resolveCustomerOrderDelivery(data),
     },
   });
 }

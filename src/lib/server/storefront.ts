@@ -30,6 +30,13 @@ export function buildDefaultStorefrontSettings(
       "Transfer tepat sesuai nominal ke rekening bank di atas, lalu tekan tombol konfirmasi di bawah agar penjual memvalidasi pembayaran dan menyiapkan pesanan Anda.",
     cash_instruction:
       "Untuk menjaga ketersediaan stok, pemesanan onsite (bayar di tempat) langsung dikonfirmasi lewat chat WhatsApp dengan detail pesanan Anda.",
+    enable_pickup: true,
+    enable_delivery: true,
+    delivery_fee: 2000,
+    pickup_info:
+      "Ready hari Senin! Bisa ambil / COD di Telkom University Purwokerto pukul 10.00 - 16.00 WIB.",
+    delivery_info:
+      "Diantar langsung ke area kos Purwokerto (ongkir Rp 2.000).",
     whatsapp_number: "",
   };
 }
@@ -94,6 +101,11 @@ export async function getPublicStorefrontData(): Promise<PublicStorefrontData | 
             settingsRow.custom_price !== undefined
               ? Number(settingsRow.custom_price)
               : null,
+          delivery_fee:
+            settingsRow.delivery_fee !== null &&
+            settingsRow.delivery_fee !== undefined
+              ? Number(settingsRow.delivery_fee)
+              : defaults.delivery_fee,
         }
       : defaults;
 

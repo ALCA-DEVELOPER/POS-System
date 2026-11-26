@@ -6,7 +6,10 @@ import {
   recordValidatedCustomerOrderSale,
   rollbackOrderAndRestoreStock,
 } from "@/lib/server/order-ledger";
-import { resolveCustomerOrderPaymentMethod } from "@/lib/customer-order-payment";
+import {
+  resolveCustomerOrderDelivery,
+  resolveCustomerOrderPaymentMethod,
+} from "@/lib/customer-order-payment";
 
 const patchCustomerOrderSchema = z.object({
   action: z.enum(["confirm_paid", "mark_ready", "mark_completed", "reject"]),
@@ -97,6 +100,7 @@ export async function PATCH(
 
     if (action === "confirm_paid") {
       const actualPaymentMethod = resolveCustomerOrderPaymentMethod(existing);
+      const delivery = resolveCustomerOrderDelivery(existing);
       if (!linkedOrderId) {
         linkedOrderId = await recordValidatedCustomerOrderSale(admin, {
           businessId: profile.business_id,
@@ -109,6 +113,9 @@ export async function PATCH(
           customerName: existing.customer_name,
           customerPhone: existing.customer_phone,
           paymentMethod: actualPaymentMethod,
+          deliveryType: delivery.delivery_type,
+          deliveryFee: delivery.delivery_fee,
+          deliveryAddress: delivery.delivery_address,
           webOrderNumber: existing.order_number,
         });
       }

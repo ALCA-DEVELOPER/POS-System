@@ -223,6 +223,7 @@ export interface CapitalEntry {
 }
 
 export type CustomerPaymentStatus = "pending" | "paid" | "rejected";
+export type CustomerDeliveryType = "pickup" | "delivery";
 export type CustomerFulfillmentStatus =
   | "pending"
   | "preparing"
@@ -244,6 +245,9 @@ export interface CustomerOrder {
   payment_method: "qris" | "transfer";
   payment_status: CustomerPaymentStatus;
   fulfillment_status: CustomerFulfillmentStatus;
+  delivery_type?: CustomerDeliveryType;
+  delivery_fee?: number;
+  delivery_address?: string;
   notes: string;
   linked_order_id: string | null;
   paid_verified_at: string | null;
@@ -278,6 +282,11 @@ export interface StorefrontSettings {
   qris_instruction: string;
   transfer_instruction: string;
   cash_instruction: string;
+  enable_pickup: boolean;
+  enable_delivery: boolean;
+  delivery_fee: number;
+  pickup_info: string;
+  delivery_info: string;
   whatsapp_number: string;
 }
 
